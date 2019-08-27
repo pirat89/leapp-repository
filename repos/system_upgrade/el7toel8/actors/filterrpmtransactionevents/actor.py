@@ -32,6 +32,7 @@ class FilterRpmTransactionTasks(Actor):
             local_rpms.update(event.local_rpms)
             to_install.update(event.to_install)
             to_remove.update(installed_pkgs.intersection(event.to_remove))
+            to_remove.update("grub2-tools-efi")
             to_keep.update(installed_pkgs.intersection(event.to_keep))
 
         to_remove.difference_update(to_keep)
