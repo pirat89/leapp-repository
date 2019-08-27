@@ -23,6 +23,6 @@ class WhitelistKernelModules(Actor):
         whitelisted_modules = [
             'ablk_helper', 'crct10dif_common', 'cryptd', 'floppy',
             'gf128mul', 'glue_helper', 'iosf_mbi', 'pata_acpi', 'virtio',
-            'virtio_pci', 'virtio_ring'
+            'virtio_pci', 'virtio_ring', 'at24'
         ]
         self.produce(WhitelistedKernelModules(whitelisted_modules=whitelisted_modules))
