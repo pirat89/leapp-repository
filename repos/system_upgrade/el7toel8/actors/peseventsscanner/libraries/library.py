@@ -10,10 +10,11 @@ from leapp.models import (InstalledRedHatSignedRPM, PESRpmTransactionTasks,
                           RepositoriesSetupTasks, RpmTransactionTasks, RepositoriesBlacklisted)
 
 # FIXME: this mapping is not complete and will need to be manually updated frequently
+curr_arch = api.current_actor().configuration.architecture
 REPOSITORIES_MAPPING = {
-    'rhel8-appstream': 'rhel-8-for-x86_64-appstream-rpms',
-    'rhel8-baseos': 'rhel-8-for-x86_64-baseos-rpms',
-    'rhel8-crb': 'codeready-builder-for-rhel-8-x86_64-rpms'}
+    'rhel8-appstream': 'rhel-8-for-{}-appstream-rpms'.format(curr_arch),
+    'rhel8-baseos': 'rhel-8-for-{}-baseos-rpms'.format(curr_arch),
+    'rhel8-crb': 'codeready-builder-for-rhel-8-{}-rpms'.format(curr_arch)}
 
 Event = namedtuple('Event', ['action',   # A string representing an event type (see EVENT_TYPES)
                              'in_pkgs',  # A dictionary with packages in format {<pkg_name>: <repository>}
