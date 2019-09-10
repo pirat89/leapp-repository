@@ -10,7 +10,7 @@ from leapp.models import (InstalledRedHatSignedRPM, PESRpmTransactionTasks,
                           RepositoriesSetupTasks, RpmTransactionTasks, RepositoriesBlacklisted)
 
 # FIXME: this mapping is not complete and will need to be manually updated frequently
-curr_arch = api.current_actor().configuration.architecture
+curr_arch = "ppc64le"
 REPOSITORIES_MAPPING = {
     'rhel8-appstream': 'rhel-8-for-{}-appstream-rpms'.format(curr_arch),
     'rhel8-baseos': 'rhel-8-for-{}-baseos-rpms'.format(curr_arch),
