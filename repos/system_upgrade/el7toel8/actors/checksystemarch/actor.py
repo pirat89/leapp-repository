@@ -26,7 +26,7 @@ class CheckSystemArch(Actor):
             architecture.ARCH_ARM64,
             architecture.ARCH_S390X,
             ]
-        if not architecture.matches_architecture(supported_arches):
+        if not architecture.matches_architecture(*supported_arches):
             create_report([
                 reporting.Title('Unsupported architecture'),
                 reporting.Summary('Upgrade process is not supported for this architecture.'),
