@@ -65,10 +65,7 @@ def _invert_dict(data):
     inv_dict = {}
     for key in data.keys():
         for value in data[key]:
-            if value not in inv_dict:
-                inv_dict[value] = [key]
-            else:
-                inv_dict[value].append(key)
+            inv_dict[value] = inv_dict.get(value, []) + [key]
     return inv_dict
 
 
