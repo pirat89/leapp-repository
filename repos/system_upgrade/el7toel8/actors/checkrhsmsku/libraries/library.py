@@ -12,13 +12,15 @@ def process():
                 create_report([
                     reporting.Title('The system is not registered or subscribed.'),
                     reporting.Summary(
-                        'The system has to be registered and subscribed to be able to proceed the upgrade.'
+                        'The system has to be registered and subscribed to be able to proceed the upgrade,'
+                        ' unless the --no-rhsm option is specified when executing leapp.'
                     ),
                     reporting.Severity(reporting.Severity.HIGH),
                     reporting.Tags([reporting.Tags.SANITY]),
                     reporting.Flags([reporting.Flags.INHIBITOR]),
                     reporting.Remediation(
                         hint='Register your system with the subscription-manager tool and attach it to proper SKUs'
-                             ' to be able to proceed the upgrade.'),
+                             ' to be able to proceed the upgrade. Or use the --no-rhsm leapp option if you want to'
+                             ' provide target repositories by yourself.'),
                     reporting.RelatedResource('package', 'subscription-manager')
                 ])
