@@ -55,8 +55,8 @@ def process():
                 ' is not used (the --no-rhsm option or the LEAPP_NO_RHSM=1'
                 ' environment variable has been set) so leapp is not able to'
                 ' obtain YUM/DNF repositories with the content for the target'
-                ' system in the standard way and has to be delivered by user'
-                ' manually.'
+                ' system in the standard way. The content has to be delivered'
+                ' by the user manually.'
                 ),
             reporting.Remediation(hint=(
                 'Create the repository file according to instructions in the'
@@ -78,7 +78,7 @@ def process():
         reporting.create_report([
             reporting.Title('CustomTargetRepositories discovered, but no new provided mechanisms used.'),
             reporting.Summary(
-                'Red Hat provides now official way how to use custom'
+                'Red Hat now provides an official way for using custom'
                 ' repositories during the in-place upgrade through'
                 ' the referred custom repository file or through the'
                 ' --enablerepo option for leapp. The CustomTargetRepositories'
@@ -89,7 +89,6 @@ def process():
                 ' during the upgrade (see the referred document) or create'
                 ' the empty custom repository file to acknowledge this report'
                 ' message.'
-
             )),
             reporting.Severity(reporting.Severity.INFO),
             reporting.ExternalLink(url=_IPU_DOC_URL, title='UPGRADING TO RHEL 8'),
