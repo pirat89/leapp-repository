@@ -20,9 +20,16 @@ class LocalReposInhibit(Actor):
     """
 
     name = "local_repos_inhibit"
-    consumes = (UsedTargetRepositories, TargetRepositories)
+    consumes = (UsedTargetRepositories, TargetRepositories, TMPTargetRepositoriesFacts)
     produces = (Report,)
     tags = (IPUWorkflowTag, TargetTransactionChecksPhaseTag)
+
+    def _get_target_repos_facts(self):
+        """
+        Get list of all target repositories
+        """
+        target_repo_files = next(self.consume(TMPTargetRepositoriesFacts)).repositories
+        return [repo for repo in repofile.data for repofile in target_repo_files]
 
     def get_used_custom_repos(self):
         """Get used custom repositories.
@@ -32,16 +39,21 @@ class LocalReposInhibit(Actor):
         # fmt: off
         used_target_repos = next(self.consume(UsedTargetRepositories)).repos
         custom_target_repos = next(self.consume(TargetRepositories)).custom_repos
+        target_repos = _get_target_repos_facts()
         # fmt: on
         used_target_repos_ids = [
             used_tg_repo.repoid for used_tg_repo in used_target_repos
         ]
-        return filter(  # pylint: disable-msg=deprecated-lambda, filter-builtin-not-iterating
-            lambda custom_target_repo: custom_target_repo.repoid
-            in used_target_repos_ids
-            and custom_target_repo.baseurl,
-            custom_target_repos,
-        )
+        # thinking about ignoring whether the repository is custom or not..
+        # the result code could be more simple and what is problem to check
+        # RH repositories too (even when they are expected to be on the network
+        # always)?
+        used_custom_repo_ids = {repo.repoid for repo in custom_target_repos if repo.repoid in used_target_repos_ids}
+        used_custom_repos = [
+            trepo for trepo in target_repos
+            if trepo.baseurl and trepo.baseurl in used_custom_repo_ids
+        ]
+        return used_custom_repos
 
     def process(self):
         for custom_repo in self.get_used_custom_repos():
