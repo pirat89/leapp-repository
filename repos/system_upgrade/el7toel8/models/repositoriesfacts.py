@@ -26,6 +26,7 @@ class RepositoriesFacts(Model):
 
     repositories = fields.List(fields.Model(RepositoryFile))
 
+
 class TMPTargetRepositoriesFacts(RepositoriesFacts):
     """
     Do not consume this model anywhere outside of localreposinhibit

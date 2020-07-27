@@ -29,7 +29,7 @@ class LocalReposInhibit(Actor):
         Get list of all target repositories
         """
         target_repo_files = next(self.consume(TMPTargetRepositoriesFacts)).repositories
-        return [repo for repo in repofile.data for repofile in target_repo_files]
+        return [repo for repofile in target_repo_files for repo in repofile.data]
 
     def get_used_custom_repos(self):
         """Get used custom repositories.
