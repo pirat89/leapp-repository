@@ -1,6 +1,6 @@
 from leapp import reporting
 from leapp.actors import Actor
-from leapp.models import TargetRepositories, UsedTargetRepositories
+from leapp.models import TargetRepositories, TMPTargetRepositoriesFacts, UsedTargetRepositories
 from leapp.reporting import Report
 from leapp.tags import IPUWorkflowTag, TargetTransactionChecksPhaseTag
 
@@ -39,7 +39,7 @@ class LocalReposInhibit(Actor):
         # fmt: off
         used_target_repos = next(self.consume(UsedTargetRepositories)).repos
         custom_target_repos = next(self.consume(TargetRepositories)).custom_repos
-        target_repos = _get_target_repos_facts()
+        target_repos = self._get_target_repos_facts()
         # fmt: on
         used_target_repos_ids = [
             used_tg_repo.repoid for used_tg_repo in used_target_repos
