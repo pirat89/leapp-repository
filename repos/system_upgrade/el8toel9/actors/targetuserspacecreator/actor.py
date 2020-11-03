@@ -38,6 +38,9 @@ class TargetUserspaceCreator(Actor):
     tags = (IPUWorkflowTag, TargetTransactionFactsPhaseTag)
 
     def process(self):
+        # POC:
+        userspacegen.perform()
+        return
         skip_check = get_env('LEAPP_DEVEL_SKIP_CHECK_OS_RELEASE', False)
         if (skip_check or version.is_supported_version()) and next(self.consume(RepositoriesMap), None):
             userspacegen.perform()

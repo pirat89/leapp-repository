@@ -100,6 +100,9 @@ def process():
     api.current_logger().debug('Current kernel: V {}, R {}'.format(current_version, current_release))
     api.current_logger().debug('Newest kernel: V {}, R {}'.format(newest_version, newest_release))
 
+    # POC:
+    return
+
     if newest_release != current_release or newest_version != current_version:
         title = 'Newest installed kernel not in use'
         summary = ('To ensure a stable upgrade, the machine needs to be'

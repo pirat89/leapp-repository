@@ -15,7 +15,8 @@ export NEWROOT=${NEWROOT:-"/sysroot"}
 
 NSPAWN_OPTS="--capability=all --bind=/sys --bind=/dev --bind=/dev/pts --bind=/run/systemd --bind=/proc"
 [ -d /dev/mapper ] NSPAWN_OPTS="$NSPAWN_OPTS --bind=/dev/mapper"
-export NSPAWN_OPTS="$NSPAWN_OPTS --bind=/run/udev --keep-unit --register=no --timezone=off --resolv-conf=off"
+# POC:
+export NSPAWN_OPTS="$NSPAWN_OPTS --bind=/run/udev --keep-unit --register=no --timezone=off --resolv-conf=off --console=autopipe"
 
 
 do_upgrade() {
@@ -38,7 +39,7 @@ do_upgrade() {
     # NOTE: in case we would need to run leapp before pivot, we would need to
     #       specify where the root is, e.g. --root=/sysroot
     # TODO: update: systemd-nspawn
-    /usr/bin/systemd-nspawn $NSPAWN_OPTS -D $NEWROOT /usr/bin/bash -c "mount -a; $LEAPPBIN upgrade --resume $args"
+    /usr/bin/systemd-nspawn $NSPAWN_OPTS -D $NEWROOT /usr/bin/bash -c "mount -a; $LEAPP3_BIN upgrade --resume $args"
     rv=$?
 
     # NOTE: flush the cached content to disk to ensure everything is written

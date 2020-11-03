@@ -1,14 +1,6 @@
-import warnings
+import dnf
 
 from leapp.exceptions import StopActorExecutionError
-
-no_yum = False
-no_yum_warning_msg = "package `yum` is unavailable"
-try:
-    import yum
-except ImportError:
-    no_yum = True
-    warnings.warn(no_yum_warning_msg, ImportWarning)
 
 
 def get_package_repository_data():
@@ -18,13 +10,14 @@ def get_package_repository_data():
         instead but there's a bug in dnf preventing us to do so:
         https://bugzilla.redhat.com/show_bug.cgi?id=1789840
     """
-    if no_yum:
-        raise StopActorExecutionError(message=no_yum_warning_msg)
-    yum_base = yum.YumBase()
+    base = dnf.Base()
+    base.fill_sack()
+    query = base.sack.query()
+    installed_pkgs = query.installed()
     pkg_repos = {}
 
     try:
-        for pkg in yum_base.doPackageLists().installed:
+        for pkg in installed_pkgs:
             pkg_repos[pkg.name] = pkg.ui_from_repo.lstrip('@')
     except ValueError as e:
         if 'locale' not in str(e):  # reraise if error is not related to locales

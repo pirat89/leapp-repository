@@ -140,12 +140,17 @@ def _get_sysctls():
                 'dev.cdrom.info', 'kernel.pty.nr')
 
     variables = []
-    for sc in run(['sysctl', '-a'], split=True)['stdout']:
-        name = sc.split(' ', 1)[0]
-        # if the sysctl name has an unstable prefix, we skip
-        if anyhasprefix(name, unstable):
-            continue
-        variables.append(sc)
+    # POC:
+    # sunrpc.transports bogus
+    try:
+        for sc in run(['sysctl', '-a'], split=True)['stdout']:
+            name = sc.split(' ', 1)[0]
+            # if the sysctl name has an unstable prefix, we skip
+            if anyhasprefix(name, unstable):
+                continue
+            variables.append(sc)
+    except UnicodeDecodeError:
+        pass
 
     # sort our variables so they can be diffed directly when needed
     for var in sorted(variables):

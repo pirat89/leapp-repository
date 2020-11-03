@@ -7,14 +7,14 @@ from leapp.workflows.policies import Policies
 from leapp.workflows.tagfilters import TagFilter
 
 
-class IPUWorkflow(Workflow):
+class IPUWorkflowEl8ToEl9(Workflow):
     """In-Place Upgrade workflow used by the leapp utility to process the in-place upgrade."""
 
-    name = 'InplaceUpgrade'
+    name = 'InplaceUpgradeEl8ToEl9'
     tag = tags.IPUWorkflowTag
-    short_name = 'ipu'
+    short_name = 'ipu_el8_to_el9'
     configuration = IPUConfig
-    description = """The IPU workflow takes care of an in-place upgrade (IPU) of RHEL 7 to RHEL 8."""
+    description = """The IPU workflow takes care of an in-place upgrade (IPU) of RHEL 8 to RHEL 9."""
 
     class FactsCollectionPhase(Phase):
         """

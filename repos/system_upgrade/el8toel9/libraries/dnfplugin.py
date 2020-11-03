@@ -9,7 +9,7 @@ from leapp.libraries.common import guards, mounting, overlaygen, rhsm, utils
 from leapp.libraries.stdlib import CalledProcessError, api, config
 
 DNF_PLUGIN_NAME = 'rhel_upgrade.py'
-DNF_PLUGIN_PATH = os.path.join('/lib/python3.6/site-packages/dnf-plugins', DNF_PLUGIN_NAME)
+DNF_PLUGIN_PATH = os.path.join('/lib/python3.9/site-packages/dnf-plugins', DNF_PLUGIN_NAME)
 DNF_PLUGIN_DATA_NAME = 'dnf-plugin-data.txt'
 DNF_PLUGIN_DATA_PATH = os.path.join('/var/lib/leapp', DNF_PLUGIN_DATA_NAME)
 DNF_PLUGIN_DATA_LOG_PATH = os.path.join('/var/log/leapp', DNF_PLUGIN_DATA_NAME)
@@ -114,7 +114,14 @@ def _transaction(context, stage, target_repoids, tasks, plugin_info, test=False,
     backup_config(context=context)
 
     # FIXME: rhsm
-    with guards.guarded_execution(guards.connection_guard(), guards.space_guard()):
+    # POC:
+    api.current_logger().error('MADAFAK')
+    print('BEFORE_GUARD' * 100)
+    print('BEFORE_GUARD' * 100)
+    import sys
+    sys.stderr.write("ERR")
+    sys.stdout.flush()
+    with guards.guarded_execution(guards.space_guard()):
         cmd = [
             '/usr/bin/dnf',
             'rhel-upgrade',
@@ -148,6 +155,11 @@ def _transaction(context, stage, target_repoids, tasks, plugin_info, test=False,
                     stdout=e.stdout, stderr=e.stderr)
             )
         finally:
+            # POC:
+            try:
+                a = context.call(['cat', '/var/log/dnf.log'])
+            except CalledProcessError as e:
+                print(e)
             if stage == 'check':
                 backup_debug_data(context=context)
 
@@ -237,7 +249,6 @@ def perform_transaction_check(target_userspace_info, used_repos, tasks, xfs_info
         with overlaygen.create_source_overlay(mounts_dir=userspace_info.mounts, scratch_dir=userspace_info.scratch,
                                               xfs_info=xfs_info, storage_info=storage_info,
                                               mount_target=os.path.join(context.base_dir, 'installroot')) as overlay:
-            utils.apply_yum_workaround(overlay.nspawn())
             _transaction(
                 context=context, stage='check', target_repoids=target_repoids, plugin_info=plugin_info, tasks=tasks
             )
@@ -253,7 +264,6 @@ def perform_rpm_download(target_userspace_info, used_repos, tasks, xfs_info, sto
         with overlaygen.create_source_overlay(mounts_dir=userspace_info.mounts, scratch_dir=userspace_info.scratch,
                                               xfs_info=xfs_info, storage_info=storage_info,
                                               mount_target=os.path.join(context.base_dir, 'installroot')) as overlay:
-            utils.apply_yum_workaround(overlay.nspawn())
             _transaction(
                 context=context, stage='download', target_repoids=target_repoids, plugin_info=plugin_info, tasks=tasks,
                 test=True, on_aws=on_aws

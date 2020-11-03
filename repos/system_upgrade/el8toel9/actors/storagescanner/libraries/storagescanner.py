@@ -38,7 +38,7 @@ def _get_cmd_output(cmd, delim, expected_len):
         api.current_logger().debug("Command '%s' return non-zero exit status: %s" % (" ".join(cmd), e.returncode))
         return
 
-    for entry in output.split('\n'):
+    for entry in output.decode().split('\n'):
         entry = entry.strip()
         if not entry:
             continue

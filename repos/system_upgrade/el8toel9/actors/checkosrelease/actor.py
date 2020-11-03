@@ -17,5 +17,7 @@ class CheckOSRelease(Actor):
     tags = (ChecksPhaseTag, IPUWorkflowTag)
 
     def process(self):
+        # POC:
+        return
         if not skip_check():
             check_os_version()

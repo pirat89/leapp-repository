@@ -9,7 +9,7 @@ RE_MACHINE_TYPE = re.compile(r'^processor.*\smachine\s*=\s*([0-9]+)')
 def _get_cpuinfo():
     """Return lines from /proc/cpuinfo."""
     # Expecting the file exists on earch system, skipping any check
-    with open('/proc/cpuinfo', 'rb') as fp:
+    with open('/proc/cpuinfo', 'r') as fp:
         return fp.readlines()
 
 

@@ -619,7 +619,7 @@ def produce_messages(tasks):
     # Type casting to list to be Py2&Py3 compatible as on Py3 keys() returns dict_keys(), not a list
     to_install_pkgs = sorted(tasks[Task.install].keys())
     to_remove_pkgs = sorted(tasks[Task.remove].keys())
-    to_enable_repos = sorted(set(tasks[Task.install].values() + tasks[Task.keep].values()))
+    to_enable_repos = sorted(set(list(tasks[Task.install].values()) + list(tasks[Task.keep].values())))
 
     if to_install_pkgs or to_remove_pkgs:
         api.produce(PESRpmTransactionTasks(to_install=to_install_pkgs,

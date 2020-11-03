@@ -50,7 +50,7 @@ def build_plugin_data(target_repoids, debug, test, tasks, on_aws):
             'disable_repos': True,
             'enable_repos': target_repoids,
             'gpgcheck': False,
-            'platform_id': 'platform:el8',
+            'platform_id': 'platform:el9',
             'releasever': api.current_actor().configuration.version.target,
             'installroot': '/installroot',
             'test_flag': test

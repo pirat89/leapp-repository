@@ -5,6 +5,7 @@ from leapp.libraries.common.config import architecture
 from leapp.libraries.stdlib import api
 from leapp.models import RequiredUpgradeInitramPackages, UpgradeDracutModule
 
+
 _REQUIRED_PACKAGES = [
     'binutils',
     'cifs-utils',
@@ -28,6 +29,8 @@ _REQUIRED_PACKAGES = [
     'nfs-utils',
     'openssh-clients',
     'plymouth',
+    'policycoreutils',
+    'rng-tools',
     'rpcbind',
     'systemd-container',
     'tar'

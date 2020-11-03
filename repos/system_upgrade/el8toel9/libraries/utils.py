@@ -45,36 +45,13 @@ def makedirs(path, mode=0o777, exists_ok=True):
     mounting._makedirs(path=path, mode=mode, exists_ok=exists_ok)
 
 
-def apply_yum_workaround(context=None):
-    """
-    Applies a workaround on the system to allow the upgrade to succeed for yum/dnf.
-    """
-    yum_script_path = api.get_tool_path('handleyumconfig')
-    if not yum_script_path:
-        raise StopActorExecutionError(
-            message='Failed to find mandatory script to apply',
-            details=reinstall_leapp_repository_hint()
-        )
-    cmd = ['/bin/bash', '-c', yum_script_path]
-
-    try:
-        context = context or mounting.NotIsolatedActions(base_dir='/')
-        context.call(cmd)
-    except OSError as e:
-        raise StopActorExecutionError(
-            message='Failed to exceute script to apply yum adjustment. Message: {}'.format(str(e))
-        )
-    except CalledProcessError as e:
-        raise StopActorExecutionError(
-            message='Failed to apply yum adjustment. Message: {}'.format(str(e))
-        )
-
-
 def logging_handler(fd_info, buf):
     """
     Custom log handler to always show stdout to console and stderr only in DEBUG mode
     """
     (_unused, fd_type) = fd_info
+    # POC:
+    buf = buf.decode(errors='ignore')
 
     if fd_type == STDOUT:
         sys.stdout.write(buf)

@@ -30,6 +30,8 @@ def scan_xfs_systemdmount(data):
 
 
 def is_xfs_without_ftype(mp):
+    # POC:
+    return False
     for l in run(['/usr/sbin/xfs_info', '{}'.format(mp)], split=True)['stdout']:
         if 'ftype=0' in l:
             return True

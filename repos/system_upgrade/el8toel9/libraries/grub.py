@@ -17,7 +17,8 @@ def has_grub(blk_dev):
         )
         raise StopActorExecution()
     os.close(blk)
-    return 'GRUB' in mbr
+    # POC:
+    return 'GRUB' in mbr.decode(errors='ignore')
 
 
 def blk_dev_from_partition(partition):

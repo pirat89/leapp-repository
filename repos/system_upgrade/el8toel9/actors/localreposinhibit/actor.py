@@ -37,6 +37,8 @@ class LocalReposInhibit(Actor):
         )
 
     def process(self):
+        # POC:
+        return
         if self.file_baseurl_in_use():
             warn_msg = (
                 "Local repository found (baseurl starts with file:///). "
