@@ -1,7 +1,8 @@
 __PKGNAME=$${_PKGNAME:-leapp-repository}
 VENVNAME ?= tut
+DIST_VERSION ?= 7
 PKGNAME=leapp-repository
-DEPS_PKGNAME=leapp-el7toel8-deps
+DEPS_PKGNAME=leapp-el8toel9-deps
 VERSION=`grep -m1 "^Version:" packaging/$(PKGNAME).spec | grep -om1 "[0-9].[0-9.]**"`
 DEPS_VERSION=`grep -m1 "^Version:" packaging/$(DEPS_PKGNAME).spec | grep -om1 "[0-9].[0-9.]**"`
 REPOS_PATH=repos
@@ -153,21 +154,21 @@ srpm: source
 	@rpmbuild -bs packaging/$(PKGNAME).spec \
 		--define "_sourcedir `pwd`/packaging/sources"  \
 		--define "_srcrpmdir `pwd`/packaging/SRPMS" \
-		--define "rhel 7" \
-		--define 'dist .el7' \
-		--define 'el7 1' || FAILED=1
+		--define "rhel $(DIST_VERSION)" \
+		--define 'dist .el$(DIST_VERSION)' \
+		--define 'el$(DIST_VERSION) 1' || FAILED=1
 	@mv packaging/$(PKGNAME).spec.bak packaging/$(PKGNAME).spec
 
 _srpm_subpkg:
 	@echo "--- Build RPM: $(DEPS_PKGNAME)-$(DEPS_VERSION)-$(RELEASE).. ---"
 	@cp packaging/$(DEPS_PKGNAME).spec packaging/$(DEPS_PKGNAME).spec.bak
 	@sed -i "s/1%{?dist}/$(RELEASE)%{?dist}/g" packaging/$(DEPS_PKGNAME).spec
-	@rpmbuild -bs packaging/$(DEPS_PKGNAME).spec \
+	rpmbuild -bs packaging/$(DEPS_PKGNAME).spec \
 		--define "_sourcedir `pwd`/packaging/sources"  \
 		--define "_srcrpmdir `pwd`/packaging/SRPMS" \
-		--define "rhel 8" \
-		--define 'dist .el8' \
-		--define 'el7 8' || FAILED=1
+		--define "rhel $$(($(DIST_VERSION) + 1))" \
+		--define "dist .el$$(($(DIST_VERSION) + 1))" \
+		--define "el$$(($(DIST_VERSION) + 1)) 1" || FAILED=1
 	@mv packaging/$(DEPS_PKGNAME).spec.bak packaging/$(DEPS_PKGNAME).spec
 
 _copr_build_deps_subpkg: _srpm_subpkg
@@ -179,7 +180,7 @@ _copr_build_deps_subpkg: _srpm_subpkg
 
 
 copr_build: srpm
-	@echo "--- Build RPM ${PKGNAME}-${VERSION}-${RELEASE}.el6.rpm in COPR ---"
+	@echo "--- Build RPM ${PKGNAME}-${VERSION}-${RELEASE}.el$(DIST_VERSION).rpm in COPR ---"
 	@echo copr --config $(_COPR_CONFIG) build $(_COPR_CHROOT) $(_COPR_REPO) \
 		packaging/SRPMS/${PKGNAME}-${VERSION}-${RELEASE}*.src.rpm
 	@copr --config $(_COPR_CONFIG) build $(_COPR_CHROOT) $(_COPR_REPO) \
