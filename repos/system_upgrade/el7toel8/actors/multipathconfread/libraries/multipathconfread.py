@@ -3,7 +3,14 @@ import os
 
 from leapp.libraries.common import multipathutil
 from leapp.libraries.common.rpms import has_package
-from leapp.models import InstalledRedHatSignedRPM, MultipathConfFacts, MultipathConfig, MultipathConfigOption
+from leapp.models import (
+    CopyFile,
+    InstalledRedHatSignedRPM,
+    MultipathConfFacts,
+    MultipathConfig,
+    MultipathConfigOption,
+    TargetUserSpaceUpgradeTasks,
+)
 from leapp.libraries.stdlib import api
 
 
@@ -201,3 +208,30 @@ def get_multipath_conf_facts(config_file='/etc/multipath.conf'):
     else:
         res_configs.extend(_parse_config_dir('/etc/multipath/conf.d'))
     return MultipathConfFacts(configs=res_configs)
+
+
+def produce_copy_to_target_task():
+    """
+    Produce task to copy files into the target userspace
+
+    The multipath configuration files are needed when the upgrade init ramdisk
+    is generated to ensure we are able to boot into the upgrade environment
+    and start the upgrade process itself. By this msg it's told that these
+    files/dirs will be available when the upgrade init ramdisk is generated.
+
+    See TargetUserSpaceUpgradeTasks and UpgradeInitramfsTasks for more info.
+    """
+    # TODO: move the function to the multipathconfcheck actor and get rid of
+    # hardcoded stuff.
+    # - The current behaviour looks from the user POV same as before this
+    # * commit. I am going to keep the proper fix for additional PR as we do
+    # * not want to make the current PR even more complex than now.
+    # * As well, I am missing some information around xDR devices, which are
+    # * possibly not handled correctly (maybe missing some executables?..)
+    copy_files = []
+    for fname in ['/etc/multipath.conf', '/etc/multipath', '/etc/xdrdevices.conf']:
+        if os.path.exists(fname):
+            copy_files.append(CopyFile(src=fname))
+
+    if copy_files:
+        api.produce(TargetUserSpaceUpgradeTasks(copy_files=copy_files))
