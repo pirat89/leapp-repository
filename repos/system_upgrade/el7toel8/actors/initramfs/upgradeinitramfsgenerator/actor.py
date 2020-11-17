@@ -1,5 +1,5 @@
 from leapp.actors import Actor
-from leapp.libraries.actor import initramgen
+from leapp.libraries.actor import upgradeinitramfsgenerator
 from leapp.models import (
     BootContent,
     RequiredUpgradeInitramPackages,  # deprecated
@@ -12,9 +12,9 @@ from leapp.models import (
 from leapp.tags import InterimPreparationPhaseTag, IPUWorkflowTag
 
 
-class InitramDiskGenerator(Actor):
+class UpgradeInitramfsGenerator(Actor):
     """
-    Creates the upgrade initram disk
+    Creates the upgrade initramfs
 
     Creates an initram disk within a systemd-nspawn container using the target system userspace, including new kernel.
     The creation of the initram disk can be influenced with RequiredUpgradeInitramPackages and UpgradeDracutModule,
@@ -22,7 +22,7 @@ class InitramDiskGenerator(Actor):
     during the dracut execution.
     """
 
-    name = 'initram_disk_generator'
+    name = 'upgrade_initramfs_generator'
     consumes = (
         RequiredUpgradeInitramPackages,  # deprecated
         TargetUserSpaceInfo,
@@ -35,4 +35,4 @@ class InitramDiskGenerator(Actor):
     tags = (IPUWorkflowTag, InterimPreparationPhaseTag)
 
     def process(self):
-        initramgen.process()
+        upgradeinitramfsgenerator.process()
