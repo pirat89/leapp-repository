@@ -3,10 +3,12 @@ import re
 from leapp.actors import Actor
 from leapp.libraries.actor.persistentnetnamesconfig import generate_link_file
 from leapp.models import PersistentNetNamesFacts, PersistentNetNamesFactsInitramfs
-from leapp.models import RenamedInterface, RenamedInterfaces, InitrdIncludes
+from leapp.models import RenamedInterface, RenamedInterfaces, InitrdIncludes, TargetInitramfsTasks
 from leapp.tags import ApplicationsPhaseTag, IPUWorkflowTag
+from leapp.utils.deprecation import suppress_deprecation
 
 
+@suppress_deprecation(InitrdIncludes)
 class PersistentNetNamesConfig(Actor):
     """
     Generate udev persistent network naming configuration
@@ -18,7 +20,7 @@ class PersistentNetNamesConfig(Actor):
 
     name = 'persistentnetnamesconfig'
     consumes = (PersistentNetNamesFacts, PersistentNetNamesFactsInitramfs)
-    produces = (RenamedInterfaces, InitrdIncludes)
+    produces = (RenamedInterfaces, InitrdIncludes, TargetInitramfsTasks)
     tags = (ApplicationsPhaseTag, IPUWorkflowTag)
     initrd_files = []
 
@@ -49,3 +51,7 @@ class PersistentNetNamesConfig(Actor):
 
         self.produce(RenamedInterfaces(renamed=renamed_interfaces))
         self.produce(InitrdIncludes(files=self.initrd_files))
+        # TODO: cover actor by tests in future. I am skipping writting of tests
+        # now as some refactoring and bugfixing related to this actor
+        # is planned already.
+        self.produce(TargetInitramfsTasks(include_files=self.initrd_files))
