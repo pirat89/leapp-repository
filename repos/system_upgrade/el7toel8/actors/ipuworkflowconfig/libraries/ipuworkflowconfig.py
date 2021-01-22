@@ -5,11 +5,16 @@ from leapp.libraries.stdlib import run, CalledProcessError
 from leapp.models import EnvVar, OSRelease
 
 CURRENT_TARGET_VERSION = '8.2'
+CURRENT_SAP_HANA_TARGET_VERSION = '8.2'
 
 ENV_IGNORE = ('LEAPP_CURRENT_PHASE', 'LEAPP_CURRENT_ACTOR', 'LEAPP_VERBOSE',
               'LEAPP_DEBUG')
 
 ENV_MAPPING = {'LEAPP_DEVEL_DM_DISABLE_UDEV': 'DM_DISABLE_UDEV'}
+
+
+LEAPP_UPGRADE_FLAVOUR_DEFAULT = 'default'
+LEAPP_UPGRADE_FLAVOUR_SAP_HANA = 'saphana'
 
 
 def get_env_vars():
@@ -60,5 +65,36 @@ def get_booted_kernel():
         )
 
 
-def get_target_version():
-    return os.getenv('LEAPP_DEVEL_TARGET_RELEASE', None) or CURRENT_TARGET_VERSION
+def get_target_version(flavour=LEAPP_UPGRADE_FLAVOUR_DEFAULT):
+    current_target_version = CURRENT_TARGET_VERSION
+    if flavour == LEAPP_UPGRADE_FLAVOUR_SAP_HANA:
+        current_target_version = CURRENT_SAP_HANA_TARGET_VERSION
+    return os.getenv('LEAPP_DEVEL_TARGET_RELEASE', None) or current_target_version
+
+
+HANA_BASE_PATH = '/hana/shared'
+HANA_SAPCONTROL_PATH = 'exe/linuxx86_64/hdb/sapcontrol'
+HANA_SAPHOSTCTRL_PATH = '/usr/sap/hostctrl/exe/saphostctrl'
+
+
+def detect_hana_shared_sapcontrol():
+    """ Detect SAP Hana based on existance of /hana/shared/*/exe/linuxx86_64/hdb/sapcontrol """
+    if os.path.exists(HANA_BASE_PATH):
+        for entry in os.listdir(HANA_BASE_PATH):
+            # Does /hana/shared/{entry}/exe/linuxx86_64/hdb/sapcontrol exist?
+            if os.path.exists(os.path.join(HANA_BASE_PATH, entry, HANA_SAPCONTROL_PATH)):
+                return True
+    return False
+
+
+def detect_sap_hana():
+    """ Detect SAP Hana either by existance of saphostctrl or sapcontrol """
+    if os.path.exists(HANA_SAPHOSTCTRL_PATH):
+        return True
+    return detect_hana_shared_sapcontrol()
+
+
+def get_upgrade_flavour():
+    if detect_sap_hana():
+        return LEAPP_UPGRADE_FLAVOUR_SAP_HANA
+    return LEAPP_UPGRADE_FLAVOUR_DEFAULT
