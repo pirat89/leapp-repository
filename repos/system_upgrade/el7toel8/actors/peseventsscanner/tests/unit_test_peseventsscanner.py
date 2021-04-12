@@ -356,7 +356,7 @@ def test_drop_conflicting_release_events():
     conflict1b = Event(2, Action.REPLACED, {'pkg1': 'repo'}, {}, (7, 6), (8, 2), [])
     conflict1c = Event(3, Action.REMOVED, {'pkg1': 'repo'}, {}, (7, 6), (8, 1), [])
     conflict2a = Event(4, Action.REMOVED, {'pkg2a': 'repo'}, {}, (7, 6), (8, 0), [])
-    conflict2b = Event(5, Action.REPLACED, {'pkg2a': 'repo', 'pkg2b': 'repo'}, {}, (7, 6), (8, 1), [])
+    conflict2b = Event(5, Action.REPLACED, {'pkg2a': 'repo'}, {'pkg2b': 'repo'}, (7, 6), (8, 1), [])
     # two input packages
     conflict3a = Event(6, Action.MERGED, {'pkg3a': 'repo', 'pkg3b': 'repo'}, {'pkg3c': 'repo'}, (7, 6), (8, 0), [])
     conflict3b = Event(7, Action.MERGED, {'pkg3a': 'repo', 'pkg3b': 'repo'}, {'pkg3d': 'repo'}, (7, 6), (8, 1), [])
