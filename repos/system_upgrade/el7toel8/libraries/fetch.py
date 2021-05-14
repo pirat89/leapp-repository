@@ -1,3 +1,4 @@
+import io
 import os
 
 import requests
@@ -22,13 +23,13 @@ def _raise_error(local_path, details):
     raise StopActorExecutionError(summary, details={'details': details, 'hint': hint})
 
 
-def _request_data(service_path, cert, proxies, timeout=REQUEST_TIMEOUT):
+def _request_data(service_path, cert, proxies, timeout=REQUEST_TIMEOUT, stream=False):
     logger = api.current_logger()
     attempt = 0
     while True:
         attempt += 1
         try:
-            return requests.get(service_path, cert=cert, proxies=proxies, timeout=REQUEST_TIMEOUT)
+            return requests.get(service_path, cert=cert, proxies=proxies, timeout=REQUEST_TIMEOUT, stream=stream)
         except requests.exceptions.Timeout as e:
             etype_msg = 'Connection timeout'
             if isinstance(e, requests.exceptions.ReadTimeout):
@@ -48,7 +49,7 @@ def _request_data(service_path, cert, proxies, timeout=REQUEST_TIMEOUT):
             )
 
 
-def read_or_fetch(filename, directory="/etc/leapp/files", service=None, allow_empty=False):
+def read_or_fetch(filename, directory="/etc/leapp/files", service=None, allow_empty=False, stream=False):
     """
     Return contents of a file or fetch them from an online service if the file does not exist.
     """
@@ -65,10 +66,12 @@ def read_or_fetch(filename, directory="/etc/leapp/files", service=None, allow_em
                 if not allow_empty and not data:
                     _raise_error(local_path, "File {lp} exists but is empty".format(lp=local_path))
                 logger.warning("File {lp} successfully read ({l} bytes)".format(lp=local_path, l=len(data)))
+                if stream:
+                    return io.BytesIO(data)
                 return data
         except EnvironmentError:
             _raise_error(local_path, "File {lp} exists but couldn't be read".format(lp=local_path))
-        except Exception as e:
+        except Exception as e:  # NOTE(vfeenstr): This should be either handled or removed. It's useless at this point
             raise e
 
     # if the data is not present locally, fetch it from the online service
@@ -79,7 +82,7 @@ def read_or_fetch(filename, directory="/etc/leapp/files", service=None, allow_em
     cert = ("/etc/pki/consumer/cert.pem", "/etc/pki/consumer/key.pem")
     response = None
     try:
-        response = _request_data(service_path, cert=cert, proxies=proxies)
+        response = _request_data(service_path, cert=cert, proxies=proxies, stream=stream)
     except requests.exceptions.RequestException as e:
         logger.error(e)
         _raise_error(local_path, "Could not fetch {f} from {sp} (unreachable address).".format(
@@ -96,4 +99,6 @@ def read_or_fetch(filename, directory="/etc/leapp/files", service=None, allow_em
         _raise_error(local_path, "File {lp} successfully retrieved but it's empty".format(lp=local_path))
     logger.warning("File {sp} successfully retrieved and read ({l} bytes)".format(
         sp=service_path, l=len(response.text)))
+    if stream:
+        return response.raw
     return response.text

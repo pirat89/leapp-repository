@@ -36,6 +36,7 @@ def _raise_error(msg, details=None):
 
     raise StopActorExecutionError(msg, details=details)
 
+
 def _check_data(dev):
     """
     Raise the StopActorExecutionError when data for the source or target system
@@ -84,7 +85,7 @@ def _get_the_list(dev, prefix):
             api.current_logger().warning('Unknown field in restricted PCI data: {}'.format())
 
     result.sort()
-    return result 
+    return result
 
 
 def get_restricted_devices(filename):
@@ -97,8 +98,8 @@ def get_restricted_devices(filename):
     process the data now to make another work with it more friendly.
     """
     try:
-        json_data = fetch.read_or_fetch(UNSUPPORTED_DRIVER_NAMES_FILE)
-        data = json.loads(json_data, encoding='utf-8')
+        json_data = fetch.read_or_fetch(UNSUPPORTED_DRIVER_NAMES_FILE, stream=True)
+        data = json.load(json_data)
     except (JSONDecodeError, UnicodeDecodeError):
         _raise_error(
             'The required leapp data has invalid JSON format and cannot be decoded.'

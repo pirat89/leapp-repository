@@ -137,7 +137,7 @@ def get_events(pes_json_directory, pes_json_filename):
     """
     try:
         return parse_pes_events(
-            fetch.read_or_fetch(pes_json_filename, directory=pes_json_directory, allow_empty=True))
+            fetch.read_or_fetch(pes_json_filename, directory=pes_json_directory, allow_empty=True, stream=True))
     except (ValueError, KeyError):
         title = 'Missing/Invalid PES data file ({}/{})'.format(pes_json_directory, pes_json_filename)
         summary = 'Read documentation at: https://access.redhat.com/articles/3664871 for more information ' \
@@ -170,13 +170,13 @@ def filter_events_by_releases(events, releases):
     return [e for e in events if e.to_release in releases]
 
 
-def parse_pes_events(json_data):
+def parse_pes_events(json_stream):
     """
     Parse JSON data returning PES events
 
     :return: List of Event tuples, where each event contains event type and input/output pkgs
     """
-    data = json.loads(json_data)
+    data = json.load(json_stream)
     if not isinstance(data, dict) or not data.get('packageinfo'):
         raise ValueError('Found PES data with invalid structure')
 
