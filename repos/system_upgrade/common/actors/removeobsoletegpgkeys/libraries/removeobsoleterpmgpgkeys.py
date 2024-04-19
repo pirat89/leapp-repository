@@ -3,6 +3,7 @@ from leapp.libraries.common.rpms import has_package
 from leapp.libraries.stdlib import api
 from leapp.models import DNFWorkaround, InstalledRPM
 
+#TODO(pstodulk): set correct value for el 10
 # maps target version to keys obsoleted in that version
 OBSOLETED_KEYS_MAP = {
     7: [],
@@ -12,6 +13,7 @@ OBSOLETED_KEYS_MAP = {
         "gpg-pubkey-db42a60e-37ea5438",
     ],
     9: ["gpg-pubkey-d4082792-5b32db75"],
+    10: ["gpg-pubkey-d4082792-5b32db75"]
 }
 
 
