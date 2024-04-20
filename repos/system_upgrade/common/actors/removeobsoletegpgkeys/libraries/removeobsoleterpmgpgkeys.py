@@ -42,6 +42,12 @@ def register_dnfworkaround(keys):
 
 
 def process():
+    api.produce(
+        DNFWorkaround(
+            display_name="Migrate RPM DB",
+            script_path=api.current_actor().get_common_tool_path("migraterpmdb"),
+        )
+    )
     keys = _get_obsolete_keys()
     if not keys:
         return
