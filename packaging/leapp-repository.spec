@@ -94,13 +94,15 @@ Obsoletes:      leapp-repository-sos-plugin <= 0.9.0
 Conflicts:      leapp-upgrade-el8toel9
 
 %else
+######### RHEL 8+ (and newer) ############
+BuildRequires:  python3-devel
+Requires:       python3-leapp
+
 # NOTE(pstodulk): else if / elif has been implemented quite late. as we still
 # want to build on RHEL 7 too, go in the old way. Ref:
 # https://github.com/rpm-software-management/rpm/issues/311
 %if 0%{?rhel} == 8
 ######### RHEL 8 ############
-BuildRequires:  python3-devel
-Requires:       python3-leapp
 
 # Same as the conflict above - we want to be sure our packages are untouched
 # during the whole IPU process
