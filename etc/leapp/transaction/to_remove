@@ -3,3 +3,4 @@
 initial-setup
 # TMP entry to address OAMG-10976 during testing
 openssl-fips-provider
+openssl-fips-provider-so
