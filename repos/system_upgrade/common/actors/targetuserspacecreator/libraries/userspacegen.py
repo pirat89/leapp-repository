@@ -313,6 +313,10 @@ def _get_files_owned_by_rpms(context, dirpath, pkgs=None, recursive=False):
         for root, _, files in os.walk(searchdir):
             for filename in files:
                 relpath = os.path.relpath(os.path.join(root, filename), searchdir)
+                # "directory-hash" files are not owned by any package and can dynamically
+                # grow to a huge amount of files causing hitting open files limit
+                if 'directory-hash' in relpath:
+                    continue
                 file_list.append(relpath)
     else:
         file_list = os.listdir(searchdir)
@@ -555,7 +559,7 @@ def _copy_certificates(context, target_userspace):
     backup_pki = os.path.join(target_userspace, 'etc', 'pki.backup')
 
     with mounting.NspawnActions(base_dir=target_userspace) as target_context:
-        files_owned_by_rpms = _get_files_owned_by_rpms(target_context, '/etc/pki', recursive=False)
+        files_owned_by_rpms = _get_files_owned_by_rpms(target_context, '/etc/pki', recursive=True)
         api.current_logger().debug('Files owned by rpms: {}'.format(' '.join(files_owned_by_rpms)))
 
     # Backup container /etc/pki
@@ -626,7 +630,7 @@ def _prep_repository_access(context, target_userspace):
     # NOTE(dkubek): context.call(['update-ca-trust']) seems to not be working.
     #               I am not really sure why. The changes to files are not
     #               being written to disk.
-    #run(["chroot", target_userspace, "/bin/bash", "-c", "su - -c update-ca-trust"])
+    run(["chroot", target_userspace, "/bin/bash", "-c", "su - -c update-ca-trust"])
 
     if not rhsm.skip_rhsm():
         run(['rm', '-rf', os.path.join(target_etc, 'rhsm')])
