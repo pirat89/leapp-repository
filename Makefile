@@ -305,12 +305,20 @@ install-deps:
 		$(VENVNAME)/bin/pip install -I "git+https://github.com/oamg/leapp.git@refs/pull/$(REQ_LEAPP_PR)/head"; \
 	fi
 	$(_PYTHON_VENV) utils/install_actor_deps.py --actor=$(ACTOR) --repos="$(TEST_PATHS)"
+
 install-deps-fedora:
 	@# Check the necessary rpms are installed for py3 (and py2 below)
-	if ! rpm -q git findutils python3-virtualenv gcc; then \
-		if ! dnf install -y git findutils python3-virtualenv gcc; then \
+	if ! rpm -q git findutils gcc; then \
+		if ! dnf install -y git findutils gcc; then \
 			echo 'Please install the following rpms via the command: ' \
-				'sudo dnf install -y git findutils python3-virtualenv gcc'; \
+				'sudo dnf install -y git findutils gcc'; \
+			exit 1; \
+		fi; \
+	fi
+	if ! command -v virtualenv; then \
+		if ! (dnf install -y python3-virtualenv || pip install virtualenv); then \
+			echo 'Please install the following packages via the command: ' \
+				'sudo dnf install -y python3-virtualenv or pip install virtualenv'; \
 			exit 1; \
 		fi; \
 	fi
@@ -432,6 +440,10 @@ test_container:
 		export CONT_FILE="utils/container-tests/Containerfile.rhel8"; \
 		export _VENV="python3.6"; \
 		;; \
+	rhel9) \
+		export CONT_FILE="utils/container-tests/Containerfile.rhel9"; \
+		export _VENV="python3.9"; \
+		;; \
 	*) \
 		echo "Error: Available containers are: f34, rhel7, rhel8"; exit 1; \
 		;; \
@@ -481,7 +493,7 @@ test_container_all_no_lint:
 # clean all testing and building containers and their images
 clean_containers:
 	@for i in "leapp-repo-tests-f34" "leapp-repo-tests-rhel7" "leapp-repo-tests-rhel8" \
-	"leapp-repo-build-el7" "leapp-repo-build-el8"; do \
+	"leapp-repo-tests-rhel9" "leapp-repo-build-el7" "leapp-repo-build-el8"; do \
 		$(_CONTAINER_TOOL) kill "$$i-cont" || :; \
 		$(_CONTAINER_TOOL) rm "$$i-cont" || :; \
 		$(_CONTAINER_TOOL) rmi "$$i" || :;  \
@@ -492,7 +504,7 @@ fast_lint:
 	FILES_TO_LINT="$$(git diff --name-only $(MASTER_BRANCH) --diff-filter AMR | grep '\.py$$')"; \
 	if [[ -n "$$FILES_TO_LINT" ]]; then \
 		pylint -j 0 $$FILES_TO_LINT $(PYLINT_ARGS) && \
-		flake8 $$FILES_TO_LINT $(FLAKE8_ARG); \
+		flake8 $$FILES_TO_LINT $(FLAKE8_ARGS); \
 		LINT_EXIT_CODE="$$?"; \
 		if [[ "$$LINT_EXIT_CODE" != "0" ]]; then \
 			exit $$LINT_EXIT_CODE; \
