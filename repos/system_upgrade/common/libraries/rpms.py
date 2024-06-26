@@ -35,7 +35,7 @@ _LEAPP_PACKAGES_MAP = {
                                      },
         LeappComponents.COCKPIT: {'7': {'pkgs': ['cockpit-leapp']},
                                   '8': {'pkgs': ['cockpit-leapp']},
-                                  '9': {'pkgs': ['']}
+                                  '9': {'pkgs': []}
                                   },
         LeappComponents.TOOLS: {'7': {'pkgs': ['snactor']},
                                 '8': {'pkgs': ['snactor']},
