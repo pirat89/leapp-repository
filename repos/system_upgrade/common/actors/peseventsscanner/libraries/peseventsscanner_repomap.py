@@ -6,7 +6,7 @@ DEFAULT_PESID = {
     '7': 'rhel7-base',
     '8': 'rhel8-BaseOS',
     '9': 'rhel9-BaseOS',
-    '10': 'rhel9-BaseOS'
+    '10': 'rhel10-BaseOS'
 }
 
 
