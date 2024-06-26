@@ -3,7 +3,7 @@ from leapp.libraries.common.rpms import has_package
 from leapp.libraries.stdlib import api
 from leapp.models import DNFWorkaround, InstalledRPM
 
-#TODO(pstodulk): set correct value for el 10
+# TODO(pstodulk): set correct value for el 10
 # maps target version to keys obsoleted in that version
 OBSOLETED_KEYS_MAP = {
     7: [],
@@ -42,12 +42,6 @@ def register_dnfworkaround(keys):
 
 
 def process():
-    api.produce(
-        DNFWorkaround(
-            display_name="Migrate RPM DB",
-            script_path=api.current_actor().get_common_tool_path("migraterpmdb"),
-        )
-    )
     keys = _get_obsolete_keys()
     if not keys:
         return
