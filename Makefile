@@ -111,7 +111,7 @@ help:
 	@echo "                              packaging"
 	@echo "  srpm                        create the SRPM"
 	@echo "  build_container             create the RPM in container"
-	@echo "                              - set BUILD_CONTAINER to el7 or el8"
+	@echo "                              - set BUILD_CONTAINER to el7, el8 or el9"
 	@echo "                              - don't run more than one build at the same time"
 	@echo "                                since containers operate on the same files!"
 	@echo "  copr_build                  create the COPR build using the COPR TOKEN"
@@ -164,7 +164,7 @@ help:
 	@echo "  PR=7 SUFFIX='my_additional_suffix' make <target>"
 	@echo "  MR=6 COPR_CONFIG='path/to/the/config/copr/file' make <target>"
 	@echo "  ACTOR=<actor> TEST_LIBS=y make test"
-	@echo "  BUILD_CONTAINER=rhel7 make build_container"
+	@echo "  BUILD_CONTAINER=el7 make build_container"
 	@echo "  TEST_CONTAINER=f34 make test_container"
 	@echo "  CONTAINER_TOOL=docker TEST_CONTAINER=rhel7 make test_container_no_lint"
 	@echo ""
@@ -258,12 +258,15 @@ build_container:
 		el8) \
 			CONT_FILE="utils/container-builds/Containerfile.ubi8"; \
 			;; \
+		el9) \
+			CONT_FILE="utils/container-builds/Containerfile.ubi9"; \
+			;; \
 		"") \
 			echo "BUILD_CONTAINER must be set"; \
 			exit 1; \
 			;; \
 		*) \
-			echo "Available containers are el7, el8"; \
+			echo "Available containers are el7, el8, el9"; \
 			exit 1; \
 			;; \
 	esac && \
