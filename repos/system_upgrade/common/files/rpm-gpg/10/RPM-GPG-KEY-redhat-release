@@ -1,3 +1,14 @@
+The following public key can be used to verify RPM packages built and
+signed by Red Hat, Inc.  This key is used for packages in Red Hat
+products shipped after November 2009, and for all updates to those
+products.
+
+Questions about this key should be sent to security@redhat.com.
+
+pub   4096R/FD431D51 2009-10-22
+      Key fingerprint = 567E 347A D004 4ADE 55BA  8A5F 199E 2F91 FD43 1D51
+uid                  Red Hat, Inc. (release key 2) <security@redhat.com>
+
 -----BEGIN PGP PUBLIC KEY BLOCK-----
 Version: GnuPG v2.0.22 (GNU/Linux)
 
@@ -27,7 +38,6 @@ ycyA/9H/mp/NUSNM2cqnBDcZ6GhlHt59zWtEveiuU5fpTbp4GVcFXbW8jStj8j8z
 1HI3cywZO8+YNPzqyx0JWsidXGkfzkPHyS4jTG84lfu2JG8m/nqLnRSeKpl20Q==
 =79bX
 -----END PGP PUBLIC KEY BLOCK-----
-
 -----BEGIN PGP PUBLIC KEY BLOCK-----
 
 mQINBGIpIp4BEAC/o5e1WzLIsS6/JOQCs4XYATYTcf6B6ALzcP05G0W3uRpUQSrL
