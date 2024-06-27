@@ -2,3 +2,4 @@
 
 mv /var/lib/rpm /usr/lib/sysimage/rpm
 ln -sfr /usr/lib/sysimage/rpm /var/lib/rpm
+/usr/bin/rpmdb --rebuilddb

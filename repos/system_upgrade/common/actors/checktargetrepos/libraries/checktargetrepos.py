@@ -78,8 +78,7 @@ def process():
             reporting.Severity(reporting.Severity.HIGH),
             reporting.Groups([reporting.Groups.SANITY]),
             reporting.Groups([reporting.Groups.INHIBITOR]),
-            reporting.ExternalLink(url=ipu_doc_url, title='UPGRADING TO RHEL {}'.format(target_major_version)),  # noqa: E501, pylint: disable=possibly-used-before-assignment
-
+            reporting.ExternalLink(url=ipu_doc_url, title='UPGRADING TO RHEL {}'.format(target_major_version)),
             reporting.RelatedResource('file', CUSTOM_REPO_PATH),
         ])
     elif not (is_ctrf or is_re):
@@ -102,6 +101,6 @@ def process():
                 ' message.'
             )),
             reporting.Severity(reporting.Severity.INFO),
-            reporting.ExternalLink(url=ipu_doc_url, title='UPGRADING TO RHEL {}'.format(target_major_version)),  # noqa: E501, pylint: disable=possibly-used-before-assignment
+            reporting.ExternalLink(url=ipu_doc_url, title='UPGRADING TO RHEL {}'.format(target_major_version)),
             reporting.RelatedResource('file', CUSTOM_REPO_PATH),
         ])
