@@ -554,6 +554,7 @@ RHUI_CLOUD_MAP = {
 }
 
 
+# TODO(mmatuska) deprecate or adjust for 9to10?
 def get_upg_path():
     """
     Get upgrade path in specific string format

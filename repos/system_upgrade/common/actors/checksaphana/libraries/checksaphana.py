@@ -7,7 +7,8 @@ from leapp.models import SapHanaInfo
 # Supported architectures for upgrades with SAP HANA to RHEL 'X'
 SAP_HANA_SUPPORTER_ARCHS = {
     '8': [architecture.ARCH_X86_64],
-    '9': [architecture.ARCH_X86_64, architecture.ARCH_PPC64LE]
+    '9': [architecture.ARCH_X86_64, architecture.ARCH_PPC64LE],
+    # TODO(mmatuska): what arches are supported for sap hana for 9to10?
 }
 
 SAP_HANA_MINIMAL_MAJOR_VERSION = 2
