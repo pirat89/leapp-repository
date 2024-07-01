@@ -8,7 +8,6 @@ disable=
  no-name-in-module,
  raising-bad-type,
  redundant-keyword-arg,  # it's one or the other, this one is not so bad at all
- possibly-used-before-assignment,  # E0606
 # "W" Warnings for stylistic problems or minor programming issues
  no-absolute-import,
  arguments-differ,
@@ -25,7 +24,6 @@ disable=
  unused-argument,
  unused-import,
  unspecified-encoding,
- contextmanager-generator-missing-cleanup,  # W0135
 # "C" Coding convention violations
  bad-continuation,
  missing-docstring,
