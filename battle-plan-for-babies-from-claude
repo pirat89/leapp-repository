@@ -1,0 +1,328 @@
+# targetuserspacecreator — Behavior Inventory & Refactor Baseline
+
+## Context
+
+We plan to refactor the `targetuserspacecreator` actor. Its logic module
+(`libraries/userspacegen.py`, ~1443 lines) carries a standing developer TODO
+(Issue #486, lines 45–67) stating the module does five distinct jobs, parses
+repofiles redundantly, and needs significant restructuring. Before touching it,
+we need a complete, code-derived contract of *everything the actor does* so we
+can verify after the refactor that no required behavior was lost.
+
+Stated intent: **the only external (outside-world) change is dropping deprecated
+functionality, eventually replaced by a conceptual solution.** One finding below
+challenges how "internal" that really is (see §D).
+
+All items below are read directly from the source [High certainty] unless marked.
+
+Files:
+- `repos/system_upgrade/common/actors/targetuserspacecreator/actor.py` — thin entrypoint
+- `.../libraries/userspacegen.py` — essentially all logic
+- `.../libraries/constants.py` — scratch/mount/userspace paths
+- `.../tests/unit_test_targetuserspacecreator.py` — unit tests
+
+---
+
+## A. High-level purpose
+
+Build the **target userspace**: a minimal install of the *target* OS RPM stack
+(dnf, rpm, util-linux, …) laid into `/var/lib/leapp/el{TARGET_MAJOR}userspace`,
+so leapp can enter it as a container (nspawn/chroot) and run target binaries
+(the real DNF upgrade transaction, dracut initramfs build). Bootstrapped inside a
+writable **source overlay** (overlayfs over the running system) entered via
+nspawn, then decoupled into its own directory.
+
+Runs in **TargetTransactionFactsCollectionPhase** (tags `IPUWorkflowTag,
+TargetTransactionFactsPhaseTag`). Effective order in phase: `createisorepofile`
+(produces `CustomTargetRepositoryFile`) → **this actor** →
+`convert/swapdistropackagesworkaround` (consumes our output).
+
+---
+
+## B. Messages (the interface contract)
+
+**Consumes:** `CustomTargetRepositoryFile`, `LiveModeConfig` (declared, unused
+here), `RHSMInfo`, `RHUIInfo`, `RepositoriesFacts` (error-hint path only),
+`RepositoriesMapping` (gate: must be non-empty to run), `RequiredTargetUserspacePackages`
+(**deprecated**), `StorageInfo` (required), `TargetOSInstallationImage` (optional
+ISO), `TargetRepositories`, `TargetUserSpacePreupgradeTasks`, `XFSPresence`,
+`PkgManagerInfo` (error-hint path only).
+
+**Produces:** `TargetUserSpaceInfo` (main output: path/scratch/mounts),
+`UsedTargetRepositories` (repoids actually used), `Report` (inhibitors/warnings),
+`TMPTargetRepositoriesFacts` (**deprecated**).
+
+Downstream consumers of our output (blast radius of any interface change):
+- `TargetUserSpaceInfo` → 15+ actors incl. all dnf* transaction/download actors,
+  initramfs generators, `adjustlocalrepos`, livemode, convert workaround.
+- `UsedTargetRepositories` → 9 actors incl. dnf* actors, `enablerhsmtargetrepos`,
+  `missinggpgkeysinhibitor`, `adjustlocalrepos`.
+- `TMPTargetRepositoriesFacts` → **only** `adjustlocalrepos`, `missinggpgkeysinhibitor`.
+
+---
+
+## C. Behavior inventory (use-case checklist)
+
+### Entry gating
+1. Runs only if `(LEAPP_DEVEL_SKIP_CHECK_OS_RELEASE set OR is_supported_version())`
+   AND a `RepositoriesMapping` message exists (`actor.py:57-60`).
+
+### Input aggregation (`_InputData`)
+2. Default packages: `dnf`, `dnf-command(config-manager)`, `dnf-command(download)`,
+   `util-linux`.
+3. Adds `install_rpms` + `copy_files` from `TargetUserSpacePreupgradeTasks`
+   (dedupes CopyFiles by (src,dst)).
+4. Adds packages from **deprecated** `RequiredTargetUserspacePackages`.
+5. Collects `RHSMInfo`, `RHUIInfo`, `XFSPresence`, `StorageInfo`, custom repofiles.
+6. Error: no RHSMInfo & not skip_rhsm → StopActorExecution ("Is this system registered?").
+7. Error: skip_rhsm but RHSMInfo present → StopActorExecutionError (inconsistent).
+8. Error: no StorageInfo → StopActorExecutionError.
+
+### Overlay / container orchestration (`perform`)
+9. Compute reserved free space via `overlaygen.get_recommended_leapp_free_space`.
+10. Create source overlay (`create_source_overlay`, passes storage_info, xfs_info,
+    scratch_reserve) → nspawn scratch container.
+11. Mount target ISO into container root if `TargetOSInstallationImage` present.
+
+### Repository setup
+12. RHUI (cloud) setup if `RHUIInfo` present — full client swap in scratch
+    container via `dnf shell` (remove source clients, install target clients);
+    pre/post-install task application; `bootstrap_target_client` toggle (skip
+    install, rely on bundled files); `enable_only_repoids_in_copied_files` toggle;
+    foreign-repofile renaming to isolate `dnf repolist`; cleanup of injected/
+    unowned repofiles.
+13. RHSM: `set_container_mode`, `switch_certificate` (install chosen product cert).
+14. CentOS Stream: `adjust_dnf_stream_variable` writes `{major}-stream` to dnf
+    `$stream` var (only when target distro == centos).
+15. Install custom repofiles into container (`_install_custom_repofiles`).
+16. Gather usable target repos (`gather_target_repositories`): match distro repos
+    against discovered repoids + custom repos against all repoids.
+17. Distro repoid discovery (`_get_distro_available_repoids`) + RHUI repoid
+    discovery. Base-repo (baseos+appstream) presence check — **skipped** for
+    conversions, CS8→CS9, and non-rhel-without-rhsm.
+
+### Userspace build (`_create_target_userspace`)
+18. `prepare_target_userspace`: wipe+recreate userspace dir; bind-mount into
+    container; import target GPG keys (unless nogpgcheck); run
+    `dnf install` into `--installroot` with target releasever, module_platform_id,
+    disable-all/enable-selected repos, `--disableplugin subscription-manager` if
+    skip_rhsm, `--nogpgcheck` if set.
+19. `_prep_repository_access`: copy certificates (decoupling symlinks, preserving
+    RPM-owned files under /etc/pki), `update-ca-trust` via chroot, copy /etc/rhsm
+    (unless skip_rhsm), shuffle /etc/yum.repos.d preserving RPM-owned repo files.
+20. Copy `copy_files` into userspace.
+21. Install leapp DNF plugin (`dnfplugin.install`).
+22. RHUI: remove injected repofiles not owned by RPMs (when not bootstrap_target_client).
+23. Re-enter userspace via nspawn, set RHSM container mode.
+
+### Output production
+24. Parse target container repofiles → produce **deprecated** `TMPTargetRepositoriesFacts`.
+25. Produce `UsedTargetRepositories`.
+26. Produce `TargetUserSpaceInfo`.
+
+### Cross-cutting behaviors
+27. Cert/symlink decoupling engine (`_copy_decouple`, `_choose_copy_or_link`,
+    `_copy_symlinks`, `_copy_certificates`): copy links pointing outside srcdir as
+    real files, preserve links inside; skip broken/circular symlinks; RPM-owned
+    files always win. (Most heavily unit-tested behavior, ~55 cases.)
+28. RPM-ownership queries (`_get_files_owned_by_rpms`, recursive with
+    `/directory-hash` skip for EL9+ ca-certificates performance).
+29. Dev persistent package cache (`LEAPP_DEVEL_USE_PERSISTENT_PACKAGE_CACHE`):
+    move cache in/out of userspace `var/cache/dnf`.
+30. Disk-space handling: proactive reserve (see #9); reactive parse of dnf
+    "more space needed" → friendly error + dedicated-partition KB link.
+31. Product certificate selection by arch (x86_64/aarch64/ppc64le/s390x) ×
+    product type (ga/beta); rhel-only, else None; missing cert → inhibitor.
+32. GPG check toggle (`LEAPP_NOGPGCHECK` / `is_nogpgcheck_set`).
+33. Proxy detection on dnf failure → proxy-specific hint (leapp unsupported
+    behind proxy).
+34. CentOS→RHEL conversion hint on dnf failure ("target may not be released, use
+    --target-version").
+
+### Inhibitors / reports (must survive refactor)
+- Missing product certificate (HIGH, INHIBITOR).
+- Duplicate repositories (MEDIUM, INHIBITOR) — only when skip_rhsm.
+- Missing base repos baseos/appstream (HIGH, INHIBITOR).
+- No enabled target repositories (HIGH, INHIBITOR).
+- Missing custom target repositories (HIGH, INHIBITOR).
+
+### Env vars read
+`LEAPP_CONTAINER_ROOT`, `LEAPP_DEVEL_SKIP_CHECK_OS_RELEASE`,
+`LEAPP_DEVEL_SKIP_RHSM` (**deprecated**), `LEAPP_DEVEL_USE_PERSISTENT_PACKAGE_CACHE`,
+`LEAPP_NO_RHSM` (via `rhsm.skip_rhsm`), `LEAPP_NOGPGCHECK`, target/product-type
+devel overrides.
+
+---
+
+## D. Deprecated functionality & drop analysis
+
+| Item | Producer(s) | Consumer(s) | Safe to drop cleanly? |
+|---|---|---|---|
+| `RequiredTargetUserspacePackages` (model, `@deprecated` 2021-10-10, replaced by `TargetUserSpacePreupgradeTasks`) | `cloud/checkrhui` **declares but never emits it** (stale decl) | this actor only | **Yes** — no live producer, replacement already consumed here. Edit both actors + this test. |
+| `LEAPP_DEVEL_SKIP_RHSM` (env var) | — | this actor only (single file) | **Yes** — already only logs a warning; successor is `LEAPP_NO_RHSM`/`--no-rhsm`. |
+| `TMPTargetRepositoriesFacts` (model, `@deprecated` 2020-09-01) | **this actor only** | **`adjustlocalrepos` + `missinggpgkeysinhibitor`** | **No — not internal.** See below. |
+
+**The hole in "only internal changes":** dropping `TMPTargetRepositoriesFacts` is
+an outside-world change. Two other actors consume it, and **no existing
+non-deprecated model carries the same data** (target repofiles with full
+baseurl/mirrorlist/gpgkey detail). `RepositoriesFacts` is the same *shape* but
+semantically describes the *source* system — which is exactly why the temporary
+model was created. So "replacing by a conceptual solution" here is a real design
+task spanning three actors, not a delete. `RequiredTargetUserspacePackages` and
+`LEAPP_DEVEL_SKIP_RHSM` are genuinely low-risk drops.
+
+---
+
+## E. Verification approach (post-refactor)
+
+1. **Message interface**: diff `consumes`/`produces` tuples; confirm nothing in
+   §B was dropped except intentionally-removed deprecated models, and that all
+   downstream consumers (§B) still get their inputs.
+2. **Behavior checklist**: walk §C items 1–34 against the refactored code.
+3. **Inhibitors/reports**: confirm all five reports in §C still fire on their
+   triggers (titles/severity/keys preserved — `missinggpgkeysinhibitor` etc. may
+   key off them).
+4. **Tests**: run the actor unit tests (`make test` / container CI per
+   `leapp-test-runner` skill). Note coverage gaps — `perform` orchestration,
+   RHUI swap, cert copying, `_prep_repository_access`, `prepare_target_userspace`,
+   disk-space handler are **not** unit-tested, so behavior verification for those
+   must be by code review against §C, not the suite.
+5. **Lint**: run repo linters per `leapp-test-runner`.
+
+---
+
+## F. Refactor scope (confirmed with user)
+
+Goal: **both** — (1) internal restructuring per #486, AND (2) drop the deprecated
+functionality, designing a real conceptual replacement for
+`TMPTargetRepositoriesFacts` and migrating all three actors. `TMPTargetRepositoriesFacts`
+is *not* to be dropped without a replacement.
+
+---
+
+## G. Refactor plan
+
+Do this as **separate commits** so review can verify each: (1) pure module split
+with zero logic change, (2) repofile-parse dedup, (3) model replacement +
+migration, (4) deprecated drops.
+
+### G1. Decompose `userspacegen.py` (behavior-preserving move)
+
+Split the ~5 responsibilities into modules under the actor's `libraries/`
+(imported as `leapp.libraries.actor.<name>`). `userspacegen.py` shrinks to
+`perform()` + message production.
+
+- `inputdata.py` — `InputData` (rename from `_InputData`) + `_consume_data`.
+- `targetrhui.py` — `setup_target_rhui_access_if_needed`, `_apply_rhui_access_*`,
+  `_get_rhui_available_repoids`, `_remove_injected_repofiles_from_our_rhui_packages`,
+  `get_copy_location_from_copy_in_task`.
+- `targetrepos.py` — `gather_target_repositories`, `_gather_target_repositories`,
+  `_get_distro_available_repoids`, `_get_all_available_repoids`,
+  `_inhibit_if_no_base_repos`, `_inhibit_on_duplicate_repos`,
+  `_install_custom_repofiles`, `adjust_dnf_stream_variable`
+  (+ `_get_product_certificate_path`). Keep `@suppress_deprecation(RHELTargetRepository)`
+  (separate, out-of-scope deprecation).
+- `bootstrap.py` — `prepare_target_userspace`, `_create_target_userspace`,
+  `_create_target_userspace_directories`, `_import_gpg_keys`,
+  `_handle_transaction_err_msg_size`, `_restore/_backup_to_persistent_package_cache`,
+  `_copy_files`, `_get_target_userspace`.
+- `repoaccess.py` (or `rpmfiles.py`) — `_prep_repository_access`,
+  `_copy_certificates`, `_copy_decouple`, `_copy_symlinks`, `_choose_copy_or_link`,
+  `_mkdir_with_copied_mode`, `_get_files_owned_by_rpms`, `_query_rpm_for_pkg_files`,
+  `BrokenSymlinkError`.
+
+Circular-import care: the two `rpm -qf/-ql` helpers are used by both RHUI and
+repo-access code — give them one home (`repoaccess.py`) and import into
+`targetrhui.py`; `repoaccess`/`rpmfiles` must not import `targetrhui`.
+
+### G2. Repofile-parse dedup — narrower than #486 implies
+
+**Honest scoping [High]:** repofiles are parsed at `_get_all_available_repoids`
+(l.814, scratch overlay, pre-userspace) and again in `perform` (l.1425, *after*
+`/etc/yum.repos.d` is rewritten). These parse the **same container in different
+states** and **cannot be collapsed** without changing behavior. Real, safe dedup:
+- Extract `parsed_repofiles_or_stop(context)` wrapping `repofileutils.get_parsed_repofiles`
+  with the identical ~8-line StopActorExecutionError handler duplicated at
+  l.815-821, 1316-1323, 1426-1434. Reuse at all three sites.
+- Have `_get_all_available_repoids` **return the parsed repofiles list** (not just
+  the repoid set) so the duplicate-repo inhibitor + repoid extraction share one
+  parse. (This is the one change with a behavioral footprint — add a test that the
+  duplicate-repo inhibitor still fires under `skip_rhsm`.)
+- Out of scope: folding in `rhsm._inhibit_on_duplicate_repos` (l.782 TODO) — lives
+  in shared `rhsm` lib, touches other actors.
+
+### G3. Replace `TMPTargetRepositoriesFacts`
+
+Consumers read the full `RepositoryFile`/`RepositoryData` shape:
+`adjustlocalrepos` uses `.file`, `.repoid`, `.baseurl`, `.mirrorlist`;
+`missinggpgkeysinhibitor` uses `.repoid`, `.additional_fields` (gpgkey/gpgcheck).
+Same shape as `RepositoriesFacts` but for the **target** — can't reuse
+`RepositoriesFacts` (already produced for the source; consumers run in target phase).
+
+New model in `models/repositoriesfacts.py`, reusing existing `RepositoryFile`:
+```python
+class TargetRepositoriesFacts(Model):
+    topic = SystemFactsTopic
+    repositories = fields.List(fields.Model(RepositoryFile))
+```
+Only the type name changes — no consumer field-access change needed.
+
+Migration (**one PR** — leapp validates consumed types exist):
+- `targetuserspacecreator`: produce `TargetRepositoriesFacts`; drop the
+  `@suppress_deprecation(TMPTargetRepositoriesFacts)` + deprecated import;
+  update `actor.py` produces/imports.
+- `adjustlocalrepos` + `missinggpgkeysinhibitor` (actor.py + `missinggpgkey.py`):
+  swap import/consume; remove `@suppress_deprecation`; update docstrings/tests.
+- Delete `TMPTargetRepositoriesFacts` from `models/repositoriesfacts.py` (deprecated
+  2020, far past window; produced/consumed only in-repo, all updated atomically).
+  Record removal + replacement in `docs/.../deprecations-list.md` "Next release".
+- **Caveat [Medium]:** out-of-tree third-party consumers weren't exhaustively
+  disproven. Model was marked temporary/internal, so risk is low; if the team wants
+  belt-and-suspenders, keep it one release as
+  `class TMPTargetRepositoriesFacts(TargetRepositoriesFacts)` and stop producing it.
+  Recommendation: remove outright.
+
+### G4. Drop remaining deprecated functionality
+
+- `RequiredTargetUserspacePackages`: no live producer (`cloud/checkrhui`'s
+  `produces` entry is stale — verified). Remove import/consume/decorator in this
+  actor (`inputdata.py` + `actor.py`), the stale `produces` in
+  `cloud/checkrhui/actor.py`, and test fixtures. Optionally delete the model
+  (`models/targetuserspace.py:114-117`); note in deprecations-list.
+- `LEAPP_DEVEL_SKIP_RHSM`: delete `_check_deprecated_rhsm_skip` (l.74-85) + its
+  call in `perform` + stale comment (l.1401). Successor is `LEAPP_NO_RHSM`/`--no-rhsm`.
+
+---
+
+## H. Verification (post-refactor)
+
+1. Behavior: walk §C items 1–34 against refactored code (the primary check — see
+   coverage gaps below).
+2. Interface: diff consumes/produces; confirm §B intact except the intentional
+   model swap/drops; confirm all downstream consumers still resolve.
+3. Inhibitors: all five §C reports still fire (titles/severity/keys preserved).
+4. Tests: run `targetuserspacecreator` + `adjustlocalrepos` +
+   `missinggpgkeysinhibitor` unit tests and `make lint` / snactor validation for
+   model wiring (use `leapp-test-runner` skill for single-actor/container runs).
+5. Git hygiene: G1 must show as pure renames under `git diff -M`. Where tests
+   monkeypatch `userspacegen.<fn>`, update patch targets to the new module (prefer
+   over re-import aliasing).
+
+**Coverage gaps (verify by review, not the suite) [High]:** `perform` body
+(`test_perform_ok` mocks nearly everything), the whole RHUI swap path (explicitly
+"out of tests" — highest-risk move due to foreign-repofile rename/restore +
+`dnf shell`), `_copy_certificates` broken-symlink recovery, `_prep_repository_access`,
+`prepare_target_userspace`, `_handle_transaction_err_msg_size`.
+
+---
+
+## I. Critical files
+
+- `.../targetuserspacecreator/libraries/userspacegen.py` (split into the G1 modules)
+- `.../targetuserspacecreator/actor.py`, `.../tests/unit_test_targetuserspacecreator.py`
+- `repos/system_upgrade/common/models/repositoriesfacts.py` (new model + drop old)
+- `repos/system_upgrade/common/models/targetuserspace.py` (drop deprecated model)
+- `.../actors/adjustlocalrepos/actor.py` + `libraries/adjustlocalrepos.py` + tests
+- `.../actors/missinggpgkeysinhibitor/actor.py` + `libraries/missinggpgkey.py` + tests
+- `.../actors/cloud/checkrhui/actor.py` (stale `produces`)
+- `docs/source/libraries-and-api/deprecations-list.md`
