@@ -1,6 +1,5 @@
 import os
 
-from leapp.exceptions import StopActorExecutionError
 from leapp.libraries.common import mounting, rhsm
 from leapp.libraries.stdlib import api, CalledProcessError, run
 
