@@ -6,7 +6,6 @@ from leapp.models import (
     DNFPluginTask,
     InstalledRPM,
     KernelCmdlineArg,
-    RequiredTargetUserspacePackages,
     RHUIInfo,
     RpmTransactionTasks,
     TargetRepositories,
@@ -28,7 +27,6 @@ class CheckRHUI(Actor):
     produces = (
         KernelCmdlineArg,
         RHUIInfo,
-        RequiredTargetUserspacePackages,
         Report, DNFPluginTask,
         RpmTransactionTasks,
         TargetRepositories,

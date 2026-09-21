@@ -1,5 +1,5 @@
 from leapp.models import fields, Model
-from leapp.topics import BootPrepTopic, TargetUserspaceTopic, TransactionTopic
+from leapp.topics import BootPrepTopic, TransactionTopic
 from leapp.utils.deprecation import deprecated
 
 
@@ -109,12 +109,6 @@ class TargetUserSpaceUpgradeTasks(TargetUserSpacePreupgradeTasks):
     it's sure the upgrade is not inhibited) these tasks are executed just
     in time it's 'sure' the upgrade is going to happen.
     """
-
-
-@deprecated(since='2021-10-10', message='Replaced by TargetUserSpacePreupgradeTasks.')
-class RequiredTargetUserspacePackages(Model):
-    topic = TargetUserspaceTopic
-    packages = fields.List(fields.String(), default=[])
 
 
 @deprecated(since='2021-10-10', message='Replaced by TargetUserSpaceInitrdEnvTasks')

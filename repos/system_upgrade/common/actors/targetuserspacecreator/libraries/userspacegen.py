@@ -4,7 +4,7 @@ from leapp import reporting
 from leapp.exceptions import StopActorExecution, StopActorExecutionError
 from leapp.libraries.actor import bootstrap, constants, inputdata, targetrepos, targetrhui
 from leapp.libraries.common import mounting, overlaygen
-from leapp.libraries.common.config import get_env, get_product_type, get_target_distro_id
+from leapp.libraries.common.config import get_product_type, get_target_distro_id
 from leapp.libraries.stdlib import api
 from leapp.models import (
     RepositoriesFactsTarget,
@@ -39,20 +39,6 @@ from leapp.models import (
 # Issue: #486
 
 PROD_CERTS_FOLDER = 'prod-certs'
-
-
-def _check_deprecated_rhsm_skip():
-    # we do not plan to cover this case by tests as it is purely
-    # devel/testing stuff, that becomes deprecated now
-    # just log the warning now (better than nothing?); deprecation process will
-    # be specified in close future
-    if get_env('LEAPP_DEVEL_SKIP_RHSM', '0') == '1':
-        api.current_logger().warning(
-            'The LEAPP_DEVEL_SKIP_RHSM has been deprecated. Use'
-            ' LEAPP_NO_RHSM instead or use the --no-rhsm option for'
-            ' leapp. as well custom repofile has not been defined.'
-            ' Please read documentation about new "skip rhsm" solution.'
-        )
 
 
 def _get_product_certificate_path():
@@ -131,10 +117,6 @@ def _get_product_certificate_path():
 
 
 def perform():
-    # NOTE: this one action is out of unit-tests completely; we do not use
-    # in unit tests the LEAPP_DEVEL_SKIP_RHSM envar anymore
-    _check_deprecated_rhsm_skip()
-
     indata = inputdata.InputData()
     prod_cert_path = _get_product_certificate_path()
     reserve_space = overlaygen.get_recommended_leapp_free_space(bootstrap._get_target_userspace())

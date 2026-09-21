@@ -888,17 +888,12 @@ def test_get_product_certificate_path_nonrhel(monkeypatch, src_distro):
     assert path is None
 
 
-@suppress_deprecation(models.RequiredTargetUserspacePackages)
 def _gen_packages_msgs():
     _cfiles = [
         models.CopyFile(src='/path/src', dst='/path/dst'),
         models.CopyFile(src='/path/foo', dst='/path/bar'),
     ]
     return [
-        models.RequiredTargetUserspacePackages(),
-        models.RequiredTargetUserspacePackages(packages=['pkgA']),
-        models.RequiredTargetUserspacePackages(packages=['pkgB', 'pkgsC']),
-        models.RequiredTargetUserspacePackages(packages=['pkgD']),
         models.TargetUserSpacePreupgradeTasks(),
         models.TargetUserSpacePreupgradeTasks(install_rpms=['pkgA']),
         models.TargetUserSpacePreupgradeTasks(install_rpms=['pkgB', 'pkgsC']),
@@ -945,29 +940,21 @@ testInData = namedtuple(
 )
 
 
-# NOTE: tests cover know new, deprecated, and both ways how to require packages
-# that should be installed to create the target userspace. Cases which could be
-# removed completely after the drop of the deprecated functionality, are marked
-# with the `# dep` str.
+# NOTE: tests cover the various ways to require packages that should be installed
+# to create the target userspace.
 @pytest.mark.parametrize('raised,no_rhsm,testdata', [
     # valid cases with RHSM
     (None, '0', testInData(_PACKAGES_MSGS, _RHSMINFO_MSG, None, _XFS_MSG, _STORAGEINFO_MSG, None)),
-    (None, '0', testInData(_PACKAGES_MSGS[:4], _RHSMINFO_MSG, None, _XFS_MSG, _STORAGEINFO_MSG, None)),   # dep
-    (None, '0', testInData(_PACKAGES_MSGS[4:8], _RHSMINFO_MSG, None, _XFS_MSG, _STORAGEINFO_MSG, None)),  # dep
     (None, '0', testInData(_PACKAGES_MSGS[0], _RHSMINFO_MSG, None, _XFS_MSG, _STORAGEINFO_MSG, None)),
-    (None, '0', testInData(_PACKAGES_MSGS[4], _RHSMINFO_MSG, None, _XFS_MSG, _STORAGEINFO_MSG, None)),    # dep
     (None, '0', testInData([], _RHSMINFO_MSG, None, _XFS_MSG, _STORAGEINFO_MSG, None)),
     (None, '0', testInData(_PACKAGES_MSGS, _RHSMINFO_MSG, None, None, _STORAGEINFO_MSG, None)),
     (None, '0', testInData(_PACKAGES_MSGS, _RHSMINFO_MSG, None, _XFS_MSG, _STORAGEINFO_MSG, _CTRF_MSGS)),
     (None, '0', testInData(_PACKAGES_MSGS[0], _RHSMINFO_MSG, None, _XFS_MSG, _STORAGEINFO_MSG, _CTRF_MSGS)),
-    (None, '0', testInData(_PACKAGES_MSGS[4], _RHSMINFO_MSG, None, _XFS_MSG, _STORAGEINFO_MSG, _CTRF_MSGS)),  # dep
     (None, '0', testInData([], _RHSMINFO_MSG, None, _XFS_MSG, _STORAGEINFO_MSG, _CTRF_MSGS)),
     (None, '0', testInData(_PACKAGES_MSGS, _RHSMINFO_MSG, None, None, _STORAGEINFO_MSG, _CTRF_MSGS)),
 
     # valid cases without RHSM (== skip_rhsm)
     (None, '1', testInData(_PACKAGES_MSGS, None, _RHUIINFO_MSG, _XFS_MSG, _STORAGEINFO_MSG, None)),
-    (None, '1', testInData(_PACKAGES_MSGS[:4], None, _RHUIINFO_MSG, _XFS_MSG, _STORAGEINFO_MSG, None)),   # dep
-    (None, '1', testInData(_PACKAGES_MSGS[4:8], None, _RHUIINFO_MSG, _XFS_MSG, _STORAGEINFO_MSG, None)),  # dep
     (None, '1', testInData(_PACKAGES_MSGS, None, _RHUIINFO_MSG, None, _STORAGEINFO_MSG, None)),
     (None, '1', testInData([], None, _RHUIINFO_MSG, _XFS_MSG, _STORAGEINFO_MSG, None)),
     (None, '1', testInData([], None, _RHUIINFO_MSG, None, _STORAGEINFO_MSG, None)),
@@ -980,16 +967,12 @@ testInData = namedtuple(
     ((_SAEE, 'RHSM is not'), '1', testInData(_PACKAGES_MSGS, _RHSMINFO_MSG, None, _XFS_MSG, _STORAGEINFO_MSG, None)),
     ((_SAEE, 'RHSM is not'), '1', testInData(_PACKAGES_MSGS[0], _RHSMINFO_MSG, None, _XFS_MSG, _STORAGEINFO_MSG,
                                              None)),
-    ((_SAEE, 'RHSM is not'), '1', testInData(_PACKAGES_MSGS[4], _RHSMINFO_MSG, None, _XFS_MSG, _STORAGEINFO_MSG,
-                                             None)),  # dep
     ((_SAEE, 'RHSM is not'), '1', testInData([], _RHSMINFO_MSG, None, _XFS_MSG, _STORAGEINFO_MSG, None)),
     ((_SAEE, 'RHSM is not'), '1', testInData(_PACKAGES_MSGS, _RHSMINFO_MSG, None, None, _STORAGEINFO_MSG, None)),
     ((_SAEE, 'RHSM is not'), '1', testInData(_PACKAGES_MSGS, _RHSMINFO_MSG, None, _XFS_MSG, _STORAGEINFO_MSG,
                                              _CTRF_MSGS)),
     ((_SAEE, 'RHSM is not'), '1', testInData(_PACKAGES_MSGS[0], _RHSMINFO_MSG, None, _XFS_MSG,
                                              _STORAGEINFO_MSG, _CTRF_MSGS)),
-    ((_SAEE, 'RHSM is not'), '1', testInData(_PACKAGES_MSGS[4], _RHSMINFO_MSG, None, _XFS_MSG,
-                                             _STORAGEINFO_MSG, _CTRF_MSGS)),  # dep
     ((_SAEE, 'RHSM is not'), '1', testInData([], _RHSMINFO_MSG, None, _XFS_MSG, _STORAGEINFO_MSG, _CTRF_MSGS)),
     ((_SAEE, 'RHSM is not'), '1', testInData(_PACKAGES_MSGS, _RHSMINFO_MSG, None, None, _STORAGEINFO_MSG, _CTRF_MSGS)),
 

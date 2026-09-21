@@ -19,6 +19,8 @@ Only the versions in which a deprecation has been made are listed.
 - **`TMPTargetRepositoriesFacts`** model has been removed (deprecated since v0.11.0).
 Use the new `RepositoriesFactsTarget` model, which provides the same information about
 the target system repositories.
+- **`RequiredTargetUserspacePackages`** model has been removed (deprecated since 2021).
+Use the `TargetUserSpacePreupgradeTasks` model instead (see the `install_rpms` field).
 
 ## v0.25.0 <span style="font-size:0.5em; font-weight:normal">(till January 2027)</span>
 - Environment variables
