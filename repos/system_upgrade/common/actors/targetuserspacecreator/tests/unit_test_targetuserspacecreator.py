@@ -1106,6 +1106,50 @@ def test_gather_target_repositories_none_available(monkeypatch):
         assert inhibitors[0].get('title', '') == 'Cannot find required basic target OS repositories.'
 
 
+def test_get_all_available_repoids_duplicate_inhibitor(monkeypatch):
+    # The same repoid defined in two different repofiles => duplicate.
+    repofiles = [
+        models.RepositoryFile(file='/etc/yum.repos.d/a.repo', data=[
+            models.RepositoryData(repoid='dup', name='dup A'),
+            models.RepositoryData(repoid='uniqueA', name='unique A'),
+        ]),
+        models.RepositoryFile(file='/etc/yum.repos.d/b.repo', data=[
+            models.RepositoryData(repoid='dup', name='dup B'),
+            models.RepositoryData(repoid='uniqueB', name='unique B'),
+        ]),
+    ]
+    monkeypatch.setattr(repofileutils, 'get_parsed_repofiles', lambda context: repofiles)
+    monkeypatch.setattr(targetrepos.api, 'current_actor', CurrentActorMocked())
+    monkeypatch.setattr(targetrepos.api, 'current_logger', logger_mocked())
+    monkeypatch.setattr(reporting, 'create_report', create_report_mocked())
+
+    # When rhsm is NOT skipped, duplicate detection is left to rhsm => no report here.
+    monkeypatch.setattr(rhsm, 'skip_rhsm', lambda: False)
+    repoids = targetrepos._get_all_available_repoids(None)
+    assert repoids == {'dup', 'uniqueA', 'uniqueB'}
+    assert reporting.create_report.called == 0
+
+    # When rhsm IS skipped, the duplicate-repo inhibitor must still fire.
+    monkeypatch.setattr(rhsm, 'skip_rhsm', lambda: True)
+    repoids = targetrepos._get_all_available_repoids(None)
+    assert repoids == {'dup', 'uniqueA', 'uniqueB'}
+    assert reporting.create_report.called == 1
+    report = reporting.create_report.reports[0]
+    assert report['title'] == 'A YUM/DNF repository defined multiple times'
+    assert reporting.Groups.INHIBITOR in report['groups']
+
+
+def test_parsed_repofiles_or_stop_raises(monkeypatch):
+    def _raise(context):
+        raise repofileutils.InvalidRepoDefinition('missing name', repofile='/etc/yum.repos.d/x.repo', repoid='x')
+
+    monkeypatch.setattr(repofileutils, 'get_parsed_repofiles', _raise)
+    with pytest.raises(StopActorExecutionError) as err:
+        targetrepos.parsed_repofiles_or_stop(None, 'Failed to parse available repoids: {}', 'do the thing')
+    assert 'Failed to parse available repoids' in err.value.message
+    assert err.value.details == {'hint': 'do the thing'}
+
+
 @suppress_deprecation(models.RHELTargetRepository)
 def test_gather_target_repositories_rhui(monkeypatch):
 

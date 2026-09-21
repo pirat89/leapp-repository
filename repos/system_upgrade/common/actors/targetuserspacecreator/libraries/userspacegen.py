@@ -3,7 +3,7 @@ import os
 from leapp import reporting
 from leapp.exceptions import StopActorExecution, StopActorExecutionError
 from leapp.libraries.actor import bootstrap, constants, inputdata, targetrepos, targetrhui
-from leapp.libraries.common import mounting, overlaygen, repofileutils
+from leapp.libraries.common import mounting, overlaygen
 from leapp.libraries.common.config import get_env, get_product_type, get_target_distro_id
 from leapp.libraries.stdlib import api
 from leapp.models import TMPTargetRepositoriesFacts  # deprecated all the time
@@ -157,17 +157,13 @@ def perform():
                 target_repoids = targetrepos._gather_target_repositories(context, indata, prod_cert_path)
                 bootstrap._create_target_userspace(context, indata, indata.packages, indata.files, target_repoids)
                 # TODO: this is tmp solution as proper one needs significant refactoring
-                try:
-                    target_repo_facts = repofileutils.get_parsed_repofiles(context)
-                except repofileutils.InvalidRepoDefinition as e:
-                    raise StopActorExecutionError(
-                        message="Failed to parse target system repofiles: {}".format(str(e)),
-                        details={
-                            'hint': 'Ensure the repository definition is correct or remove it '
-                                    'if the repository is not needed anymore. '
-                                    'This issue is typically caused by missing definition of the name field. '
-                                    'For more information, see: https://access.redhat.com/solutions/6969001.'
-                        })
+                target_repo_facts = targetrepos.parsed_repofiles_or_stop(
+                    context,
+                    "Failed to parse target system repofiles: {}",
+                    'Ensure the repository definition is correct or remove it '
+                    'if the repository is not needed anymore. '
+                    'This issue is typically caused by missing definition of the name field. '
+                    'For more information, see: https://access.redhat.com/solutions/6969001.')
                 api.produce(TMPTargetRepositoriesFacts(repositories=target_repo_facts))
                 # ## TODO ends here
                 api.produce(UsedTargetRepositories(

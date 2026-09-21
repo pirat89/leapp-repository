@@ -11,6 +11,33 @@ from leapp.models import RHELTargetRepository, TargetRepositories
 from leapp.utils.deprecation import suppress_deprecation
 
 
+def parsed_repofiles_or_stop(context, error_message, hint):
+    """
+    Parse the repofiles present in the given container context.
+
+    Thin wrapper around :func:`repofileutils.get_parsed_repofiles` that turns a
+    malformed repository definition into a StopActorExecutionError carrying the
+    caller-provided message and remediation hint. The message and hint differ per
+    call site (different container states / audiences), so they are passed in
+    rather than hardcoded here.
+
+    :param context: the container whose /etc/yum.repos.d is parsed
+    :type context: mounting.IsolatedActions
+    :param error_message: message template with a single ``{}`` for the error detail
+    :type error_message: str
+    :param hint: remediation hint stored in the error details
+    :type hint: str
+    :return: parsed repofiles
+    :rtype: list[RepositoryFile]
+    """
+    try:
+        return repofileutils.get_parsed_repofiles(context)
+    except repofileutils.InvalidRepoDefinition as e:
+        raise StopActorExecutionError(
+            message=error_message.format(str(e)),
+            details={'hint': hint})
+
+
 def _inhibit_on_duplicate_repos(repofiles):
     """
     Inhibit the upgrade if any repoid is defined multiple times.
@@ -49,15 +76,11 @@ def _inhibit_on_duplicate_repos(repofiles):
 
 
 def _get_all_available_repoids(context):
-    try:
-        repofiles = repofileutils.get_parsed_repofiles(context)
-    except repofileutils.InvalidRepoDefinition as e:
-        raise StopActorExecutionError(
-            message="Failed to parse available repoids: {}".format(str(e)),
-            details={
-                'hint': 'Ensure the repository definition is correct or remove it '
-                        'if the repository is not required for the upgrade.'
-            })
+    repofiles = parsed_repofiles_or_stop(
+        context,
+        "Failed to parse available repoids: {}",
+        'Ensure the repository definition is correct or remove it '
+        'if the repository is not required for the upgrade.')
     # TODO: this is not good solution, but keep it as it is now
     # Issue: #486
     if rhsm.skip_rhsm():
