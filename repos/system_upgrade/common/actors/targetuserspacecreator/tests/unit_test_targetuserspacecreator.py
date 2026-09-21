@@ -10,7 +10,7 @@ import pytest
 
 from leapp import models, reporting
 from leapp.exceptions import StopActorExecution, StopActorExecutionError
-from leapp.libraries.actor import userspacegen
+from leapp.libraries.actor import bootstrap, inputdata, repoaccess, targetrepos, targetrhui, userspacegen
 from leapp.libraries.common import distro, overlaygen, repofileutils, rhsm
 from leapp.libraries.common.config import architecture
 from leapp.libraries.common.testutils import create_report_mocked, CurrentActorMocked, logger_mocked, produce_mocked
@@ -838,10 +838,10 @@ def test_copy_decouple(monkeypatch, temp_directory_layout, initial_structure, ex
             stderr=subprocess.STDOUT,
         )
 
-    monkeypatch.setattr(userspacegen, 'run', run_mocked)
+    monkeypatch.setattr(repoaccess, 'run', run_mocked)
     expected_dir = temp_directory_layout / 'expected' / 'dir'
     expected_dir.mkdir()
-    userspacegen._copy_decouple(
+    repoaccess._copy_decouple(
             str(temp_directory_layout / 'initial' / 'dir'),
             str(expected_dir),
             )
@@ -1052,7 +1052,7 @@ def test_consume_data(monkeypatch, raised, no_rhsm, testdata):
     if not custom_repofiles:
         custom_repofiles = []
     if not raised:
-        result = userspacegen._InputData()
+        result = inputdata.InputData()
         assert result.packages == _exp_pkgs
         assert _cfiles2set(result.files) == _cfiles2set(_exp_files)
         assert result.rhsm_info == testdata.rhsm_info
@@ -1064,7 +1064,7 @@ def test_consume_data(monkeypatch, raised, no_rhsm, testdata):
         assert not userspacegen.api.current_logger.errmsg
     else:
         with pytest.raises(raised[0]) as err:
-            userspacegen._InputData()
+            inputdata.InputData()
         if isinstance(err.value, StopActorExecutionError):
             assert raised[1] in err.value.message
         else:
@@ -1085,7 +1085,7 @@ def test_gather_target_repositories(monkeypatch):
                     models.RHELTargetRepository(repoid='repoidY')],
         custom_repos=[models.CustomTargetRepository(repoid='repoidCustom')])]))
 
-    target_repoids = userspacegen.gather_target_repositories(None, None)
+    target_repoids = targetrepos.gather_target_repositories(None, None)
 
     assert target_repoids == ['repoidX', 'repoidY', 'repoidCustom']
 
@@ -1098,7 +1098,7 @@ def test_gather_target_repositories_none_available(monkeypatch):
     monkeypatch.setattr(rhsm, 'get_available_repo_ids', lambda x: [])
     monkeypatch.setattr(rhsm, 'skip_rhsm', lambda: False)
     with pytest.raises(StopActorExecution):
-        userspacegen.gather_target_repositories(None, None)
+        targetrepos.gather_target_repositories(None, None)
         assert mocked_produce.called
         reports = [m.report for m in mocked_produce.model_instances if isinstance(m, reporting.Report)]
         inhibitors = [m for m in reports if 'INHIBITOR' in m.get('flags', ())]
@@ -1114,9 +1114,9 @@ def test_gather_target_repositories_rhui(monkeypatch):
     )
 
     monkeypatch.setattr(userspacegen.api, 'current_actor', CurrentActorMocked())
-    monkeypatch.setattr(userspacegen, '_get_all_available_repoids', lambda x: [])
+    monkeypatch.setattr(targetrepos, '_get_all_available_repoids', lambda x: [])
     monkeypatch.setattr(
-        userspacegen,
+        targetrepos,
         "_get_distro_available_repoids",
         lambda dummy_context, dummy_indata: {"rhui-1", "rhui-2", "rhui-3"},
     )
@@ -1135,7 +1135,7 @@ def test_gather_target_repositories_rhui(monkeypatch):
             )
             ])
     )
-    target_repoids = userspacegen.gather_target_repositories(None, indata)
+    target_repoids = targetrepos.gather_target_repositories(None, indata)
     assert target_repoids == set(['rhui-1', 'rhui-2'])
 
 
@@ -1161,7 +1161,7 @@ def test_gather_target_repositories_baseos_appstream_not_available(monkeypatch):
         custom_repos=[models.CustomTargetRepository(repoid='repoidCustom')])]))
 
     with pytest.raises(StopActorExecution):
-        userspacegen.gather_target_repositories(None, indata)
+        targetrepos.gather_target_repositories(None, indata)
     assert mocked_produce.called
     reports = [m.report for m in mocked_produce.model_instances if isinstance(m, reporting.Report)]
     inhibitors = [m for m in reports if 'inhibitor' in m.get('groups', ())]
@@ -1177,7 +1177,7 @@ def test_gather_target_repositories_baseos_appstream_not_available(monkeypatch):
                     models.RHELTargetRepository(repoid='repoidA')],
         custom_repos=[models.CustomTargetRepository(repoid='repoidCustom')])]))
     with pytest.raises(StopActorExecution):
-        userspacegen.gather_target_repositories(None, indata)
+        targetrepos.gather_target_repositories(None, indata)
     reports = [m.report for m in mocked_produce.model_instances if isinstance(m, reporting.Report)]
     inhibitors = [m for m in reports if 'inhibitor' in m.get('groups', ())]
     assert len(inhibitors) == 1
@@ -1191,7 +1191,7 @@ def test_gather_target_repositories_baseos_appstream_not_available(monkeypatch):
                     models.RHELTargetRepository(repoid='repoidA')],
         custom_repos=[models.CustomTargetRepository(repoid='repoidCustom')])]))
     with pytest.raises(StopActorExecution):
-        userspacegen.gather_target_repositories(None, indata)
+        targetrepos.gather_target_repositories(None, indata)
     reports = [m.report for m in mocked_produce.model_instances if isinstance(m, reporting.Report)]
     inhibitors = [m for m in reports if 'inhibitor' in m.get('groups', ())]
     assert len(inhibitors) == 1
@@ -1212,7 +1212,7 @@ def test__get_distro_available_repoids_norhsm_norhui(monkeypatch):
 
     indata = testInData(_PACKAGES_MSGS, None, None, _XFS_MSG, _STORAGEINFO_MSG, None)
     # NOTE: context is not used without rhsm, for simplicity setting to None
-    repoids = userspacegen._get_distro_available_repoids(None, indata)
+    repoids = targetrepos._get_distro_available_repoids(None, indata)
     assert repoids == set()
 
 
@@ -1244,12 +1244,12 @@ def test__get_distro_available_repoids_nobaserepos_inhibit(
 
     if src_distro == "centos" and src_ver == "8.10" or src_distro != dst_distro:
         # should not raise on CS 8to9 and when converting
-        userspacegen._get_distro_available_repoids(None, indata)
+        targetrepos._get_distro_available_repoids(None, indata)
         return
 
     with pytest.raises(StopActorExecution):
         # NOTE: context is not used without rhsm, for simplicity setting to None
-        userspacegen._get_distro_available_repoids(None, indata)
+        targetrepos._get_distro_available_repoids(None, indata)
 
         # TODO adjust the asserts when the report is made distro agnostic
         assert reporting.create_report.called == 1
@@ -1293,12 +1293,12 @@ def mocked_consume_data():
 )
 def test_perform_ok(monkeypatch, distro, cert_path):
     repoids = ['repoidX', 'repoidY']
-    monkeypatch.setattr(userspacegen, '_InputData', mocked_consume_data)
+    monkeypatch.setattr(inputdata, 'InputData', mocked_consume_data)
     monkeypatch.setattr(userspacegen, '_get_product_certificate_path', lambda: cert_path)
     monkeypatch.setattr(overlaygen, 'create_source_overlay', MockedMountingBase)
-    monkeypatch.setattr(userspacegen, '_gather_target_repositories', lambda *x: repoids)
-    monkeypatch.setattr(userspacegen, '_create_target_userspace', lambda *x: None)
-    monkeypatch.setattr(userspacegen, 'setup_target_rhui_access_if_needed', lambda *x: None)
+    monkeypatch.setattr(targetrepos, '_gather_target_repositories', lambda *x: repoids)
+    monkeypatch.setattr(bootstrap, '_create_target_userspace', lambda *x: None)
+    monkeypatch.setattr(targetrhui, 'setup_target_rhui_access_if_needed', lambda *x: None)
     monkeypatch.setattr(userspacegen.api, 'current_actor', CurrentActorMocked(release_id=distro))
     monkeypatch.setattr(userspacegen.api, 'produce', produce_mocked())
     monkeypatch.setattr(repofileutils, 'get_repodirs', lambda: ['/etc/yum.repos.d'])
@@ -1349,7 +1349,7 @@ def test__get_files_owned_by_rpms(monkeypatch):
     owned_fullpath = [os.path.join(search_dir, f) for f in owned]
     context = _MockContext('/base/dir', owned_fullpath)
 
-    out = userspacegen._get_files_owned_by_rpms(context, '/some/path', recursive=False)
+    out = repoaccess._get_files_owned_by_rpms(context, '/some/path', recursive=False)
     assert sorted(owned) == sorted(out)
 
 
@@ -1398,7 +1398,7 @@ def test__get_files_owned_by_rpms_recursive(monkeypatch):
     owned_fullpath = [os.path.join(search_dir, f) for f in owned]
     context = _MockContext('/base/dir', owned_fullpath)
 
-    out = userspacegen._get_files_owned_by_rpms(context, search_dir, recursive=True)
+    out = repoaccess._get_files_owned_by_rpms(context, search_dir, recursive=True)
     # any directory-hash directory should be skipped
     assert sorted(owned[0:4]) == sorted(out)
 
@@ -1417,12 +1417,12 @@ def test__get_files_owned_by_rpms_recursive(monkeypatch):
 def test_writing_stream_varfile(monkeypatch):
 
     monkeypatch.setattr(userspacegen.api, 'current_actor', CurrentActorMocked())
-    monkeypatch.setattr(userspacegen, 'get_target_major_version', lambda: '10')
+    monkeypatch.setattr(targetrepos, 'get_target_major_version', lambda: '10')
 
     with tempfile.NamedTemporaryFile(mode='w+') as tmpf:
         tmpf.write('incorrect-stream-value\n')
         tmpf.flush()
-        userspacegen.adjust_dnf_stream_variable(MockedMountingBase, tmpf.name)
+        targetrepos.adjust_dnf_stream_variable(MockedMountingBase, tmpf.name)
         tmpf.seek(0)
         content = tmpf.read()
 
@@ -1431,9 +1431,9 @@ def test_writing_stream_varfile(monkeypatch):
 
 def test_failing_stream_varfile_write(monkeypatch):
     monkeypatch.setattr(userspacegen.api, 'current_actor', CurrentActorMocked())
-    monkeypatch.setattr(userspacegen, 'get_target_major_version', lambda: '10')
+    monkeypatch.setattr(targetrepos, 'get_target_major_version', lambda: '10')
     with pytest.raises(StopActorExecutionError) as err:
-        userspacegen.adjust_dnf_stream_variable(MockedMountingBase, '/path/not/exists')
+        targetrepos.adjust_dnf_stream_variable(MockedMountingBase, '/path/not/exists')
 
     assert 'Failed to adjust dnf variable' in str(err.value)
 
@@ -1457,14 +1457,14 @@ def test_if_adjust_dnf_stream_variable_only_for_centos(
         "current_actor",
         CurrentActorMocked(src_distro=src_distro, dst_distro=dst_distro),
     )
-    monkeypatch.setattr(userspacegen, 'get_target_major_version', lambda: '10')
+    monkeypatch.setattr(targetrepos, 'get_target_major_version', lambda: '10')
     monkeypatch.setattr(rhsm, 'set_container_mode', do_nothing)
     monkeypatch.setattr(rhsm, 'switch_certificate', do_nothing)
-    monkeypatch.setattr(userspacegen, '_install_custom_repofiles', do_nothing)
-    monkeypatch.setattr(userspacegen, 'adjust_dnf_stream_variable', mock_adjust_stream_variable)
-    monkeypatch.setattr(userspacegen, 'gather_target_repositories', do_nothing)
+    monkeypatch.setattr(targetrepos, '_install_custom_repofiles', do_nothing)
+    monkeypatch.setattr(targetrepos, 'adjust_dnf_stream_variable', mock_adjust_stream_variable)
+    monkeypatch.setattr(targetrepos, 'gather_target_repositories', do_nothing)
 
     adjust_called = False
 
-    userspacegen._gather_target_repositories(MockedMountingBase, testInData, None)
+    targetrepos._gather_target_repositories(MockedMountingBase, testInData, None)
     assert adjust_called == should_adjust
