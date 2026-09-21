@@ -1,6 +1,5 @@
 from leapp.models import fields, Model
 from leapp.topics import SystemFactsTopic
-from leapp.utils.deprecation import deprecated
 
 
 class RepositoryData(Model):
@@ -29,17 +28,21 @@ class RepositoriesFacts(Model):
     repositories = fields.List(fields.Model(RepositoryFile))
 
 
-@deprecated(
-    since="2020-09-01",
-    message=(
-        "The model is temporary and not assumed to be used in any "
-        "other actors."
-    ),
-)
-class TMPTargetRepositoriesFacts(RepositoriesFacts):
-    """Do not consume this model anywhere outside of localreposinhibit.
-
-    The model is temporary and will be removed in close future
+class RepositoriesFactsTarget(Model):
     """
+    Point-in-time snapshot of the .repo files present in the created target
+    userspace container, captured immediately after its creation.
 
-    pass
+    The data is read from the container's repofiles (which, in RHUI cases, may
+    differ from the bundled target-OS repos). It is retained mainly for
+    auditing / post-mortem purposes and MAY not reflect later .repo edits
+    (e.g. done by the adjustlocalrepos actor); consumers that need the current
+    on-disk state must read it from the path in TargetUserSpaceInfo.
+
+    This is an independent model from RepositoriesFacts (which describes the
+    *source* system) even though it shares the same shape - the two evolve
+    independently.
+    """
+    topic = SystemFactsTopic
+
+    repositories = fields.List(fields.Model(RepositoryFile))

@@ -6,14 +6,13 @@ from leapp.libraries.actor import bootstrap, constants, inputdata, targetrepos, 
 from leapp.libraries.common import mounting, overlaygen
 from leapp.libraries.common.config import get_env, get_product_type, get_target_distro_id
 from leapp.libraries.stdlib import api
-from leapp.models import TMPTargetRepositoriesFacts  # deprecated all the time
 from leapp.models import (
+    RepositoriesFactsTarget,
     TargetOSInstallationImage,
     TargetUserSpaceInfo,
     UsedTargetRepositories,
     UsedTargetRepository
 )
-from leapp.utils.deprecation import suppress_deprecation
 
 # TODO: "refactor" (modify) the library significantly
 # The current shape is really bad and ineffective (duplicit parsing
@@ -131,7 +130,6 @@ def _get_product_certificate_path():
     return cert_path
 
 
-@suppress_deprecation(TMPTargetRepositoriesFacts)
 def perform():
     # NOTE: this one action is out of unit-tests completely; we do not use
     # in unit tests the LEAPP_DEVEL_SKIP_RHSM envar anymore
@@ -164,7 +162,7 @@ def perform():
                     'if the repository is not needed anymore. '
                     'This issue is typically caused by missing definition of the name field. '
                     'For more information, see: https://access.redhat.com/solutions/6969001.')
-                api.produce(TMPTargetRepositoriesFacts(repositories=target_repo_facts))
+                api.produce(RepositoriesFactsTarget(repositories=target_repo_facts))
                 # ## TODO ends here
                 api.produce(UsedTargetRepositories(
                     repos=[UsedTargetRepository(repoid=repo) for repo in target_repoids]))
