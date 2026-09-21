@@ -13,7 +13,9 @@
   - TMPTargetRepositoriesFacts
       -> check all use-cases
       -> replace it by a conceptual solution
-          
+  - targetrepositories.rhel_repos
+
+
 - drop obsolete check of repomap & supported os version
   (comes from the time when the actor was in the facts phase)
 - update product certs solution - no need to have it in the actor at all
