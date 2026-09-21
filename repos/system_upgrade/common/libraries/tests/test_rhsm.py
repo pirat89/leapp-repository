@@ -6,6 +6,7 @@ import pytest
 from leapp import reporting
 from leapp.exceptions import StopActorExecutionError
 from leapp.libraries.common import repofileutils, rhsm
+from leapp.libraries.common.config import architecture
 from leapp.libraries.common.testutils import create_report_mocked, CurrentActorMocked, logger_mocked
 from leapp.libraries.stdlib import api, CalledProcessError
 from leapp.models import RepositoryData, RepositoryFile, RHSMInfo
@@ -507,4 +508,76 @@ def test_switch_certificate_respect_with_rhsm(monkeypatch, context_mocked):
     rhsm.switch_certificate(context_mocked, mocked_rhsm_info(), cert_path)
 
     assert context_mocked.remove_called == []
+    assert context_mocked.copy_to_called == []
+
+
+# The common folder path resolved by CurrentActorMocked.get_common_folder_path().
+CERTS_DIR = os.path.join('..', '..', 'files', 'prod-certs')
+
+
+@pytest.mark.parametrize('arch,prod_type,cert', [
+    (architecture.ARCH_X86_64, 'ga', '479.pem'),
+    (architecture.ARCH_X86_64, 'beta', '486.pem'),
+    (architecture.ARCH_X86_64, 'htb', '479.pem'),   # only beta needs a special cert
+    (architecture.ARCH_ARM64, 'ga', '419.pem'),
+    (architecture.ARCH_PPC64LE, 'ga', '279.pem'),
+    (architecture.ARCH_S390X, 'ga', '72.pem'),
+    (architecture.ARCH_S390X, 'beta', '433.pem'),
+])
+def test_get_target_product_certificate_path(monkeypatch, arch, prod_type, cert):
+    envars = {'LEAPP_DEVEL_TARGET_PRODUCT_TYPE': prod_type}
+    monkeypatch.setattr(api, 'current_actor', CurrentActorMocked(dst_ver='8.6', arch=arch, envars=envars))
+    expected = os.path.join(CERTS_DIR, '8.6', cert)
+    # Pretend the minor-version specific certificate is bundled.
+    monkeypatch.setattr(os.path, 'isfile', lambda path: path == expected)
+    assert rhsm._get_target_product_certificate_path() == expected
+
+
+def test_get_target_product_certificate_path_major_fallback(monkeypatch):
+    monkeypatch.setattr(api, 'current_actor', CurrentActorMocked(dst_ver='8.6', arch=architecture.ARCH_X86_64))
+    monkeypatch.setattr(api, 'current_logger', logger_mocked())
+    # No minor-version certificate is bundled => fall back to the generic major cert.
+    monkeypatch.setattr(os.path, 'isfile', lambda path: False)
+    assert rhsm._get_target_product_certificate_path() == os.path.join(CERTS_DIR, '8', '479.pem')
+
+
+def test_get_target_product_certificate_path_nonrhel(monkeypatch):
+    monkeypatch.setattr(api, 'current_actor', CurrentActorMocked(dst_distro='centos'))
+    assert rhsm._get_target_product_certificate_path() is None
+
+
+def test_get_target_product_certificate_path_unknown_arch(monkeypatch):
+    monkeypatch.setattr(api, 'current_actor', CurrentActorMocked(arch='sparc64'))
+    with pytest.raises(StopActorExecutionError) as err:
+        rhsm._get_target_product_certificate_path()
+    assert 'Failed to determine what certificate to use' in str(err.value)
+
+
+def test_switch_certificate_autodiscovery(monkeypatch, context_mocked, actor_mocked):
+    """When no cert_path is passed, switch_certificate discovers it itself."""
+    cert_path = os.path.join(CERTS_DIR, '9.6', '479.pem')
+    monkeypatch.setattr(rhsm, '_get_target_product_certificate_path', lambda: cert_path)
+    monkeypatch.setattr(
+        os.path, 'isdir', lambda path: path in ('/etc/pki/product', '/etc/pki/product-default')
+    )
+    monkeypatch.setattr(os.path, 'isfile', lambda path: path == cert_path)
+
+    rhsm.switch_certificate(context_mocked, mocked_rhsm_info())
+
+    assert context_mocked.copy_to_called == [
+        (cert_path, os.path.join(target_path, '479.pem'))
+        for target_path in ('/etc/pki/product', '/etc/pki/product-default')
+    ]
+
+
+def test_switch_certificate_missing_cert_raises(monkeypatch, context_mocked, actor_mocked):
+    """A missing discovered certificate raises MissingTargetProductCertificate with the path."""
+    cert_path = os.path.join(CERTS_DIR, '9.6', '479.pem')
+    monkeypatch.setattr(rhsm, '_get_target_product_certificate_path', lambda: cert_path)
+    monkeypatch.setattr(os.path, 'isfile', lambda path: False)
+
+    with pytest.raises(rhsm.MissingTargetProductCertificate) as err:
+        rhsm.switch_certificate(context_mocked, mocked_rhsm_info())
+
+    assert err.value.details == {'cert_path': cert_path}
     assert context_mocked.copy_to_called == []

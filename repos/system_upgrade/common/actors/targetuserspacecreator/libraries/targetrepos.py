@@ -343,7 +343,7 @@ def adjust_dnf_stream_variable(context, varfile='/etc/dnf/vars/stream'):
             details={'details': str(e)})
 
 
-def _gather_target_repositories(context, indata, prod_cert_path):
+def _gather_target_repositories(context, indata):
     """
     This is wrapper function to gather the target repoids.
 
@@ -351,15 +351,19 @@ def _gather_target_repositories(context, indata, prod_cert_path):
     and this could be really just wrapper with the switch of certificates.
     I am keeping that for now as it is as interim step.
 
+    The target product certificate path is determined automatically by
+    :func:`rhsm.switch_certificate`; if it cannot be found the function raises
+    :class:`rhsm.MissingTargetProductCertificate`, which the caller translates
+    into the user-facing inhibitor report.
+
     :param context: the container where the repofiles should be copied
     :type context: mounting.IsolatedActions class
     :param indata: majority of input data for the actor
     :type indata: class InputData
-    :param prod_cert_path: path where the target product cert is stored
-    :type prod_cert_path: string
+    :raises rhsm.MissingTargetProductCertificate: if the product cert is missing
     """
     rhsm.set_container_mode(context)
-    rhsm.switch_certificate(context, indata.rhsm_info, prod_cert_path)
+    rhsm.switch_certificate(context, indata.rhsm_info)
 
     if get_target_distro_id() == 'centos':
         adjust_dnf_stream_variable(context)
