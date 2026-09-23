@@ -1445,12 +1445,12 @@ def test__get_files_owned_by_rpms_recursive(monkeypatch):
 def test_writing_stream_varfile(monkeypatch):
 
     monkeypatch.setattr(tus_userspacegen.api, 'current_actor', CurrentActorMocked())
-    monkeypatch.setattr(tus_userspacegen, 'get_target_major_version', lambda: '10')
+    monkeypatch.setattr(tus_userspacegen.tus_contentaccess, 'get_target_major_version', lambda: '10')
 
     with tempfile.NamedTemporaryFile(mode='w+') as tmpf:
         tmpf.write('incorrect-stream-value\n')
         tmpf.flush()
-        tus_userspacegen.adjust_dnf_stream_variable(MockedMountingBase, tmpf.name)
+        tus_userspacegen.tus_contentaccess.adjust_dnf_stream_variable(MockedMountingBase, tmpf.name)
         tmpf.seek(0)
         content = tmpf.read()
 
@@ -1459,9 +1459,9 @@ def test_writing_stream_varfile(monkeypatch):
 
 def test_failing_stream_varfile_write(monkeypatch):
     monkeypatch.setattr(tus_userspacegen.api, 'current_actor', CurrentActorMocked())
-    monkeypatch.setattr(tus_userspacegen, 'get_target_major_version', lambda: '10')
+    monkeypatch.setattr(tus_userspacegen.tus_contentaccess, 'get_target_major_version', lambda: '10')
     with pytest.raises(StopActorExecutionError) as err:
-        tus_userspacegen.adjust_dnf_stream_variable(MockedMountingBase, '/path/not/exists')
+        tus_userspacegen.tus_contentaccess.adjust_dnf_stream_variable(MockedMountingBase, '/path/not/exists')
 
     assert 'Failed to adjust dnf variable' in str(err.value)
 
@@ -1485,11 +1485,11 @@ def test_if_adjust_dnf_stream_variable_only_for_centos(
         "current_actor",
         CurrentActorMocked(src_distro=src_distro, dst_distro=dst_distro),
     )
-    monkeypatch.setattr(tus_userspacegen, 'get_target_major_version', lambda: '10')
+    monkeypatch.setattr(tus_userspacegen.tus_contentaccess, 'get_target_major_version', lambda: '10')
     monkeypatch.setattr(rhsm, 'set_container_mode', do_nothing)
     monkeypatch.setattr(rhsm, 'switch_certificate', do_nothing)
-    monkeypatch.setattr(tus_userspacegen, '_install_custom_repofiles', do_nothing)
-    monkeypatch.setattr(tus_userspacegen, 'adjust_dnf_stream_variable', mock_adjust_stream_variable)
+    monkeypatch.setattr(tus_userspacegen.tus_contentaccess, '_install_custom_repofiles', do_nothing)
+    monkeypatch.setattr(tus_userspacegen.tus_contentaccess, 'adjust_dnf_stream_variable', mock_adjust_stream_variable)
     monkeypatch.setattr(tus_userspacegen, 'gather_target_repositories', do_nothing)
 
     adjust_called = False

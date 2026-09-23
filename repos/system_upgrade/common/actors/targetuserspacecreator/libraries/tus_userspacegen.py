@@ -5,7 +5,7 @@ import shutil
 
 from leapp import reporting
 from leapp.exceptions import StopActorExecution, StopActorExecutionError
-from leapp.libraries.actor import tus_inputdata, tus_layout
+from leapp.libraries.actor import tus_contentaccess, tus_inputdata, tus_layout
 from leapp.libraries.common import distro, mounting, overlaygen, repofileutils, rhsm, utils
 from leapp.libraries.common.config import (
     get_env,
@@ -1055,50 +1055,13 @@ def gather_target_repositories(context, indata):
     return target_repoids
 
 
-def _install_custom_repofiles(context, custom_repofiles):
-    """
-    Install the required custom repository files into the container.
-
-    The repository files are copied from the host into the /etc/yum.repos.d
-    directory into the container.
-
-    :param context: the container where the repofiles should be copied
-    :type context: mounting.IsolatedActions class
-    :param custom_repofiles: list of custom repo files
-    :type custom_repofiles: List(CustomTargetRepositoryFile)
-    """
-    for rfile in custom_repofiles:
-        _dst_path = os.path.join('/etc/yum.repos.d', os.path.basename(rfile.file))
-        context.copy_to(rfile.file, _dst_path)
-
-
-def adjust_dnf_stream_variable(context, varfile='/etc/dnf/vars/stream'):
-    """
-    Adjust the version in the dnf 'stream' variable to the target version.
-
-    URLs in CentOS Stream repofiles contain the $stream variable which,
-    if not adjusted, retains the value from the source system making
-    the URLs point to repos for the source version. This function adjusts
-    the variable so that the URLs point to the target version repos.
-    """
-
-    target_version = get_target_major_version()
-    try:
-        with context.open(varfile, 'w') as f:
-            f.write(target_version + '-stream\n')
-    except (FileNotFoundError, OSError) as e:
-        raise StopActorExecutionError(
-            message='Failed to adjust dnf variable in {} to "{}".'.format(varfile, target_version + '-stream'),
-            details={'details': str(e)})
-
-
 def _gather_target_repositories(context, indata, prod_cert_path):
     """
-    This is wrapper function to gather the target repoids.
+    Establish content access in the container, then gather the target repoids.
 
-    Probably the function could be partially merged into gather_target_repositories
-    and this could be really just wrapper with the switch of certificates.
-    I am keeping that for now as it is as interim step.
+    The content-access setup (cert switch, container mode, CentOS $stream,
+    custom repofiles) is delegated to :mod:`contentaccess`; this wrapper only
+    sequences that command step before the discovery query.
 
     :param context: the container where the repofiles should be copied
     :type context: mounting.IsolatedActions class
@@ -1107,13 +1070,7 @@ def _gather_target_repositories(context, indata, prod_cert_path):
     :param prod_cert_path: path where the target product cert is stored
     :type prod_cert_path: string
     """
-    rhsm.set_container_mode(context)
-    rhsm.switch_certificate(context, indata.rhsm_info, prod_cert_path)
-
-    if get_target_distro_id() == 'centos':
-        adjust_dnf_stream_variable(context)
-
-    _install_custom_repofiles(context, indata.custom_repofiles)
+    tus_contentaccess.prepare_repository_access(context, indata, prod_cert_path)
     return gather_target_repositories(context, indata)
 
 
