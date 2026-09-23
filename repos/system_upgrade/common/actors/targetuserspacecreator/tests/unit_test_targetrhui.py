@@ -7,11 +7,11 @@ The RHUI client-swap path is cloud-only and historically had no unit coverage
 the RHUI code out of ``userspacegen.py`` into its own module can be verified to
 preserve it.
 
-At this point in the redesign the functions under test still live in
-``libraries/userspacegen.py``; the tests intentionally target their public entry
-points (not the surrounding orchestration), so they keep working when the code
-moves into a dedicated ``rhui.py`` module (the imports/patch targets are the only
-thing that changes then).
+These functions now live in ``libraries/rhui.py``; the tests reach them through
+``userspacegen.rhui`` (the actor library imports the module) and target their
+public entry points, not the surrounding orchestration. Renaming this file to
+``unit_test_rhui.py`` and importing ``rhui`` directly is left to the
+test-repointing step.
 
 The checklist items referenced below (R1-R6) come from CONTRACT.md section 13.
 """
@@ -141,14 +141,14 @@ def test_r1_copy_location_dst_is_dir(monkeypatch):
     monkeypatch.setattr(os.path, 'isdir', lambda path: path == '/etc/yum.repos.d')
     task = _copy('/host/foo.repo', '/etc/yum.repos.d')
     # dst resolves to an existing directory => append the src basename
-    assert tus_userspacegen.get_copy_location_from_copy_in_task('/base', task) == '/etc/yum.repos.d/foo.repo'
+    assert tus_userspacegen.tus_rhui.get_copy_location_from_copy_in_task('/base', task) == '/etc/yum.repos.d/foo.repo'
 
 
 def test_r1_copy_location_dst_is_file(monkeypatch):
     monkeypatch.setattr(os.path, 'isdir', lambda path: False)
     task = _copy('/host/foo.repo', '/etc/yum.repos.d/bar.repo')
     # dst is not an existing directory => used verbatim
-    assert tus_userspacegen.get_copy_location_from_copy_in_task('/base', task) == '/etc/yum.repos.d/bar.repo'
+    assert tus_userspacegen.tus_rhui.get_copy_location_from_copy_in_task('/base', task) == '/etc/yum.repos.d/bar.repo'
 
 
 # ---------------------------------------------------------------------------
@@ -161,7 +161,7 @@ def test_r3_preinstall_tasks_remove_then_copy(monkeypatch):
         files_to_remove=['/etc/old.repo'],
         files_to_copy_into_overlay=[_copy('/host/a.repo', '/etc/yum.repos.d/a.repo')],
     )
-    tus_userspacegen._apply_rhui_access_preinstall_tasks(ctx, _setup_info(preinstall=preinstall))
+    tus_userspacegen.tus_rhui._apply_rhui_access_preinstall_tasks(ctx, _setup_info(preinstall=preinstall))
 
     assert ctx.removed == ['/etc/old.repo']
     assert ctx.copied_to == [('/host/a.repo', '/etc/yum.repos.d/a.repo')]
@@ -180,7 +180,7 @@ def test_r4_postinstall_tasks_copy_with_cp(monkeypatch):
     postinstall = TargetRHUIPostInstallTasks(
         files_to_copy=[_copy('/in/cert.pem', '/etc/pki/cert.pem')],
     )
-    tus_userspacegen._apply_rhui_access_postinstall_tasks(ctx, _setup_info(postinstall=postinstall))
+    tus_userspacegen.tus_rhui._apply_rhui_access_postinstall_tasks(ctx, _setup_info(postinstall=postinstall))
 
     assert ctx.makedirs_called == ['/etc/pki']
     assert ('call', ['cp', '/in/cert.pem', '/etc/pki/cert.pem']) in ctx.events
@@ -212,7 +212,7 @@ def test_r2_foreign_repofiles_hidden_and_restored(monkeypatch):
     setup_info = _setup_info(preinstall=TargetRHUIPreInstallTasks())
     rhui_info = _rhui_info(setup_info)
 
-    repoids = tus_userspacegen._get_rhui_available_repoids(ctx, rhui_info)
+    repoids = tus_userspacegen.tus_rhui.get_rhui_available_repoids(ctx, rhui_info)
 
     assert repoids == {'rhui-target', 'extra'}
 
@@ -244,7 +244,7 @@ def test_r2_restores_foreign_repofiles_on_repolist_failure(monkeypatch):
     rhui_info = _rhui_info(_setup_info(preinstall=TargetRHUIPreInstallTasks()))
 
     with pytest.raises(StopActorExecutionError) as err:
-        tus_userspacegen._get_rhui_available_repoids(ctx, rhui_info)
+        tus_userspacegen.tus_rhui.get_rhui_available_repoids(ctx, rhui_info)
     assert 'Failed to retrieve repoids provided by target RHUI clients' in str(err.value)
 
     # the finally-block must have restored the repofile despite the failure
@@ -259,7 +259,7 @@ def test_r2_restores_foreign_repofiles_on_repolist_failure(monkeypatch):
 def _patch_setup_env(monkeypatch):
     monkeypatch.setattr(api, 'current_logger', logger_mocked())
     monkeypatch.setattr(api, 'current_actor', CurrentActorMocked(dst_ver='9.4'))
-    monkeypatch.setattr(tus_userspacegen, 'get_target_major_version', lambda: '9')
+    monkeypatch.setattr(tus_userspacegen.tus_rhui, 'get_target_major_version', lambda: '9')
     monkeypatch.setattr(tus_userspacegen.tus_layout, 'target_userspace_path', lambda: '/target')
     monkeypatch.setattr(tus_userspacegen.tus_layout, 'create_target_userspace_directories', lambda path: None)
 
@@ -267,7 +267,7 @@ def _patch_setup_env(monkeypatch):
 def test_r5_no_rhui_info_is_noop(monkeypatch):
     _patch_setup_env(monkeypatch)
     ctx = RhuiContextMock()
-    tus_userspacegen.setup_target_rhui_access_if_needed(ctx, _indata(None))
+    tus_userspacegen.tus_rhui.setup_target_rhui_access_if_needed(ctx, _indata(None))
     assert not ctx.events
 
 
@@ -279,7 +279,7 @@ def test_r5_bootstrap_disabled_only_applies_preinstall(monkeypatch):
         files_to_copy_into_overlay=[_copy('/host/a.repo', '/etc/yum.repos.d/a.repo')],
     )
     setup_info = _setup_info(preinstall=preinstall, bootstrap_client=False)
-    tus_userspacegen.setup_target_rhui_access_if_needed(ctx, _indata(_rhui_info(setup_info)))
+    tus_userspacegen.tus_rhui.setup_target_rhui_access_if_needed(ctx, _indata(_rhui_info(setup_info)))
 
     # preinstall applied ...
     assert ctx.removed == ['/etc/old.repo']
@@ -300,7 +300,7 @@ def test_r5_client_swap_command_and_transaction(monkeypatch):
                              supporting=['/host/a.repo'])
     rhui_info = _rhui_info(setup_info, src_clients=['src-a', 'src-b'], target_clients=['tgt'])
 
-    tus_userspacegen.setup_target_rhui_access_if_needed(ctx, _indata(rhui_info))
+    tus_userspacegen.tus_rhui.setup_target_rhui_access_if_needed(ctx, _indata(rhui_info))
 
     swap = [e[1] for e in ctx.events if e[0] == 'call' and e[1][-1] == 'shell'][0]
     # required dnf flags on the swap command
@@ -330,7 +330,7 @@ def test_r5_enable_only_repoids_restricts_to_copied_repofiles(monkeypatch):
         files_to_copy_into_overlay=[_copy('/host/a.repo', '/etc/yum.repos.d/a.repo')],
     )
     setup_info = _setup_info(preinstall=preinstall, enable_only=True, supporting=['/host/a.repo'])
-    tus_userspacegen.setup_target_rhui_access_if_needed(ctx, _indata(_rhui_info(setup_info)))
+    tus_userspacegen.tus_rhui.setup_target_rhui_access_if_needed(ctx, _indata(_rhui_info(setup_info)))
 
     swap = [e[1] for e in ctx.events if e[0] == 'call' and e[1][-1] == 'shell'][0]
     assert swap[swap.index('--disablerepo') + 1] == '*'
@@ -350,7 +350,7 @@ def test_r5_enable_only_invalid_repofile_stops(monkeypatch):
     )
     setup_info = _setup_info(preinstall=preinstall, enable_only=True)
     with pytest.raises(StopActorExecutionError) as err:
-        tus_userspacegen.setup_target_rhui_access_if_needed(ctx, _indata(_rhui_info(setup_info)))
+        tus_userspacegen.tus_rhui.setup_target_rhui_access_if_needed(ctx, _indata(_rhui_info(setup_info)))
     assert 'Failed to parse repositories for RHUI' in str(err.value)
 
 
@@ -359,7 +359,7 @@ def test_r5_swap_failure_stops(monkeypatch):
     ctx = RhuiContextMock(fail_swap=True)
     setup_info = _setup_info(preinstall=TargetRHUIPreInstallTasks(), enable_only=False)
     with pytest.raises(StopActorExecutionError) as err:
-        tus_userspacegen.setup_target_rhui_access_if_needed(ctx, _indata(_rhui_info(setup_info)))
+        tus_userspacegen.tus_rhui.setup_target_rhui_access_if_needed(ctx, _indata(_rhui_info(setup_info)))
     assert 'Failed to swap RHUI clients to establish content access' in str(err.value)
 
 
@@ -368,7 +368,7 @@ def test_r5_client_query_failure_stops(monkeypatch):
     ctx = RhuiContextMock(fail_client_query=True)
     setup_info = _setup_info(preinstall=TargetRHUIPreInstallTasks(), enable_only=False)
     with pytest.raises(StopActorExecutionError) as err:
-        tus_userspacegen.setup_target_rhui_access_if_needed(ctx, _indata(_rhui_info(setup_info)))
+        tus_userspacegen.tus_rhui.setup_target_rhui_access_if_needed(ctx, _indata(_rhui_info(setup_info)))
     assert 'Could not find the RHEL 9 RHUI client rpm' in str(err.value)
 
 
@@ -386,7 +386,7 @@ def test_r5_cleanup_removes_injected_unowned_setup_files(monkeypatch):
     )
     setup_info = _setup_info(preinstall=preinstall, enable_only=False,
                              supporting=['/host/a.repo'])
-    tus_userspacegen.setup_target_rhui_access_if_needed(ctx, _indata(_rhui_info(setup_info)))
+    tus_userspacegen.tus_rhui.setup_target_rhui_access_if_needed(ctx, _indata(_rhui_info(setup_info)))
 
     # only the injected, unowned, non-supporting repofile is cleaned up
     assert '/etc/yum.repos.d/c.repo' in ctx.removed
@@ -419,6 +419,6 @@ def test_r6_removes_unowned_repofiles_keeps_owned(monkeypatch):
             _copy('/host/unowned.repo', '/etc/yum.repos.d/unowned.repo'),
         ],
     )
-    tus_userspacegen._remove_injected_repofiles_from_our_rhui_packages(Ctx(), _setup_info(preinstall=preinstall))
+    tus_userspacegen.tus_rhui.remove_injected_repofiles(Ctx(), _setup_info(preinstall=preinstall))
 
     assert removed == ['/target/etc/yum.repos.d/unowned.repo']

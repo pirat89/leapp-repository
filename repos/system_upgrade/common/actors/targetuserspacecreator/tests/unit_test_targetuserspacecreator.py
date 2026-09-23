@@ -1326,7 +1326,7 @@ def test_perform_ok(monkeypatch, distro, cert_path):
     monkeypatch.setattr(overlaygen, 'create_source_overlay', MockedMountingBase)
     monkeypatch.setattr(tus_userspacegen, '_gather_target_repositories', lambda *x: repoids)
     monkeypatch.setattr(tus_userspacegen, '_create_target_userspace', lambda *x: None)
-    monkeypatch.setattr(tus_userspacegen, 'setup_target_rhui_access_if_needed', lambda *x: None)
+    monkeypatch.setattr(tus_userspacegen.tus_rhui, 'setup_target_rhui_access_if_needed', lambda *x: None)
     monkeypatch.setattr(tus_userspacegen.api, 'current_actor', CurrentActorMocked(release_id=distro))
     monkeypatch.setattr(tus_userspacegen.api, 'produce', produce_mocked())
     monkeypatch.setattr(repofileutils, 'get_repodirs', lambda: ['/etc/yum.repos.d'])
