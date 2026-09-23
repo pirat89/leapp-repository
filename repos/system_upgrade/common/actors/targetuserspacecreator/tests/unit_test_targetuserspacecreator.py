@@ -1072,22 +1072,50 @@ def test_consume_data(monkeypatch, raised, no_rhsm, testdata):
             assert any(raised[1] in x for x in tus_userspacegen.api.current_logger.warnmsg)
 
 
-@pytest.mark.skip(reason="Currently not implemented in the actor. It's TODO.")
-@suppress_deprecation(models.RHELTargetRepository)
 def test_gather_target_repositories(monkeypatch):
+    # Happy path (modern set-returning API): distro repos that are available AND
+    # requested plus custom repos that are available are gathered; an available
+    # distro repo that is not requested (repoidZ) is not included.
     monkeypatch.setattr(tus_userspacegen.api, 'current_actor', CurrentActorMocked())
-    # The available RHSM repos
-    monkeypatch.setattr(rhsm, 'get_available_repo_ids', lambda x: ['repoidX', 'repoidY', 'repoidZ'])
     monkeypatch.setattr(rhsm, 'skip_rhsm', lambda: False)
-    # The required RHEL repos based on the repo mapping and PES data + custom repos required by third party actors
+    monkeypatch.setattr(
+        tus_userspacegen, '_get_distro_available_repoids',
+        lambda dummy_context, dummy_indata: {'repoidX', 'repoidY', 'repoidZ'})
+    monkeypatch.setattr(tus_userspacegen, '_get_all_available_repoids', lambda dummy_context: {'repoidCustom'})
     monkeypatch.setattr(tus_userspacegen.api, 'consume', lambda x: iter([models.TargetRepositories(
-        rhel_repos=[models.RHELTargetRepository(repoid='repoidX'),
-                    models.RHELTargetRepository(repoid='repoidY')],
+        rhel_repos=[],
+        distro_repos=[models.DistroTargetRepository(repoid='repoidX'),
+                      models.DistroTargetRepository(repoid='repoidY')],
         custom_repos=[models.CustomTargetRepository(repoid='repoidCustom')])]))
 
     target_repoids = tus_userspacegen.gather_target_repositories(None, None)
 
-    assert target_repoids == ['repoidX', 'repoidY', 'repoidCustom']
+    assert target_repoids == {'repoidX', 'repoidY', 'repoidCustom'}
+
+
+def test_gather_target_repositories_missing_custom(monkeypatch):
+    # A requested custom repo that is not available raises the missing-custom
+    # inhibitor (a distro repo is available so the "no enabled repos" path is
+    # not taken first).
+    monkeypatch.setattr(tus_userspacegen.api, 'current_actor', CurrentActorMocked())
+    monkeypatch.setattr(reporting, 'create_report', create_report_mocked())
+    monkeypatch.setattr(rhsm, 'skip_rhsm', lambda: False)
+    monkeypatch.setattr(
+        tus_userspacegen, '_get_distro_available_repoids',
+        lambda dummy_context, dummy_indata: {'repoidX'})
+    monkeypatch.setattr(tus_userspacegen, '_get_all_available_repoids', lambda dummy_context: {'repoidX'})
+    monkeypatch.setattr(tus_userspacegen.api, 'consume', lambda x: iter([models.TargetRepositories(
+        rhel_repos=[],
+        distro_repos=[models.DistroTargetRepository(repoid='repoidX')],
+        custom_repos=[models.CustomTargetRepository(repoid='missing-custom')])]))
+
+    with pytest.raises(StopActorExecution):
+        tus_userspacegen.gather_target_repositories(None, None)
+
+    assert reporting.create_report.called == 1
+    report = reporting.create_report.reports[0]
+    assert report['title'] == 'Some required custom target repositories have not been found'
+    assert reporting.Groups.INHIBITOR in report['groups']
 
 
 def test_gather_target_repositories_none_available(monkeypatch):
@@ -1468,3 +1496,275 @@ def test_if_adjust_dnf_stream_variable_only_for_centos(
 
     tus_userspacegen._gather_target_repositories(MockedMountingBase, testInData, None)
     assert adjust_called == should_adjust
+
+
+# ===========================================================================
+# Behavior-anchored safety net (added for the redesign):
+#   - dnf install command shape + the 4 failure-hint branches
+#   - the duplicate-repos inhibitor
+#   - _prep_repository_access cert/repo file merge
+#   - the frozen _copy_certificates multi-hop symlink carve-out (xfail)
+# All assertions target observable behavior (recorded commands / produced
+# reports), never internal helper names, so they survive the module reshuffle.
+# ===========================================================================
+
+
+class _DummyCM:
+    """A no-op context manager standing in for BindMount / NspawnActions."""
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+
+class _CmdRecorderContext:
+    """Minimal mounting context: records context.call() command lists."""
+
+    def __init__(self, base_dir='/scratch', raise_exc=None):
+        self.base_dir = base_dir
+        self.commands = []
+        self._raise_exc = raise_exc
+
+    def call(self, cmd, **kwargs):
+        self.commands.append(list(cmd))
+        if self._raise_exc is not None:
+            raise self._raise_exc
+        return {'stdout': '', 'stderr': ''}
+
+    def full_path(self, path):
+        return os.path.join(self.base_dir, str(path).lstrip('/'))
+
+
+def _cpe_with_stderr(stderr):
+    cmd = ['dnf', 'install', '-y']
+    return CalledProcessError(
+        message='Command {0} failed'.format(cmd),
+        command=cmd,
+        result={'signal': None, 'exit_code': 1, 'pid': 0, 'stdout': '', 'stderr': stderr},
+    )
+
+
+def _consume_by_model(mapping):
+    def _consume(model, *args, **kwargs):
+        return iter(mapping.get(model, []))
+    return _consume
+
+
+def _expected_dnf_cmd(nogpgcheck, skip_rhsm, verbose, enabled_repos, packages,
+                      releasever='9.6', major='9'):
+    cmd = ['dnf', 'install', '-y']
+    if nogpgcheck:
+        cmd.append('--nogpgcheck')
+    cmd += [
+        '--setopt=module_platform_id=platform:el{}'.format(major),
+        '--setopt=keepcache=1',
+        '--releasever', releasever,
+        '--installroot', '/el{}target'.format(major),
+        '--disablerepo', '*',
+    ]
+    for repo in enabled_repos:
+        cmd += ['--enablerepo', repo]
+    cmd += list(packages)
+    if verbose:
+        cmd.append('-v')
+    if skip_rhsm:
+        cmd += ['--disableplugin', 'subscription-manager']
+    return cmd
+
+
+def _patch_prepare_env(monkeypatch, nogpgcheck=False, skip_rhsm=False, verbose=False,
+                       source_distro='rhel', target_distro='rhel', consume_map=None):
+    monkeypatch.setattr(tus_userspacegen.api, 'current_actor', CurrentActorMocked(dst_ver='9.6'))
+    monkeypatch.setattr(tus_userspacegen.api, 'consume', _consume_by_model(consume_map or {}))
+    monkeypatch.setattr(tus_userspacegen, 'get_target_major_version', lambda: '9')
+    monkeypatch.setattr(tus_userspacegen, 'get_target_version', lambda: '9.6')
+    monkeypatch.setattr(tus_userspacegen, 'get_source_distro_id', lambda: source_distro)
+    monkeypatch.setattr(tus_userspacegen, 'get_target_distro_id', lambda: target_distro)
+    monkeypatch.setattr(tus_userspacegen, 'run', lambda *a, **k: {'stdout': '', 'stderr': ''})
+    monkeypatch.setattr(tus_userspacegen, '_backup_to_persistent_package_cache', lambda d: None)
+    monkeypatch.setattr(tus_userspacegen, '_restore_persistent_package_cache', lambda d: None)
+    monkeypatch.setattr(tus_userspacegen, '_create_target_userspace_directories', lambda d: None)
+    monkeypatch.setattr(tus_userspacegen, '_import_gpg_keys', lambda *a, **k: None)
+    monkeypatch.setattr(tus_userspacegen.mounting, 'BindMount', _DummyCM)
+    monkeypatch.setattr(tus_userspacegen, 'is_nogpgcheck_set', lambda: nogpgcheck)
+    monkeypatch.setattr(tus_userspacegen.rhsm, 'skip_rhsm', lambda: skip_rhsm)
+    monkeypatch.setattr(tus_userspacegen.config, 'is_verbose', lambda: verbose)
+
+
+@pytest.mark.parametrize('nogpgcheck', [False, True])
+@pytest.mark.parametrize('skip_rhsm', [False, True])
+@pytest.mark.parametrize('verbose', [False, True])
+def test_prepare_target_userspace_dnf_command(monkeypatch, nogpgcheck, skip_rhsm, verbose):
+    _patch_prepare_env(monkeypatch, nogpgcheck=nogpgcheck, skip_rhsm=skip_rhsm, verbose=verbose)
+    ctx = _CmdRecorderContext()
+    enabled_repos = ['BaseOS', 'AppStream']
+    packages = ['pkgA', 'pkgB']
+
+    tus_userspacegen.prepare_target_userspace(ctx, '/some/userspace', enabled_repos, list(packages))
+
+    assert len(ctx.commands) == 1
+    assert ctx.commands[0] == _expected_dnf_cmd(
+        nogpgcheck, skip_rhsm, verbose, enabled_repos=enabled_repos, packages=packages)
+
+
+def test_prepare_target_userspace_disk_space_hint(monkeypatch):
+    _patch_prepare_env(monkeypatch)
+    stderr = 'Disk Requirements:\n  At least 250MB more space needed on the / filesystem.\n'
+    ctx = _CmdRecorderContext(raise_exc=_cpe_with_stderr(stderr))
+
+    with pytest.raises(StopActorExecutionError) as err:
+        tus_userspacegen.prepare_target_userspace(ctx, '/u', ['BaseOS'], ['pkg'])
+
+    assert err.value.message == 'There is not enough space on the file system hosting /var/lib/leapp.'
+    assert '250MB' in err.value.details['hint']
+    assert tus_userspacegen.DEDICATED_LEAPP_PART_URL in err.value.details['hint']
+
+
+def test_prepare_target_userspace_dnf_conf_proxy_hint(monkeypatch):
+    pmi = models.PkgManagerInfo(configured_proxies=['http://proxy'])
+    _patch_prepare_env(monkeypatch, consume_map={models.PkgManagerInfo: [pmi]})
+    ctx = _CmdRecorderContext(raise_exc=_cpe_with_stderr('some unrelated dnf error'))
+
+    with pytest.raises(StopActorExecutionError) as err:
+        tus_userspacegen.prepare_target_userspace(ctx, '/u', ['BaseOS'], ['pkg'])
+
+    assert '/etc/dnf/dnf.conf' in err.value.details['hint']
+    assert '/etc/leapp/files/dnf.conf' in err.value.details['hint']
+
+
+def test_prepare_target_userspace_repo_proxy_hint(monkeypatch):
+    repo_facts = models.RepositoriesFacts(repositories=[
+        models.RepositoryFile(file='/etc/yum.repos.d/x.repo', data=[
+            models.RepositoryData(repoid='r', name='n', proxy='http://p', enabled=True)])])
+    _patch_prepare_env(monkeypatch, consume_map={models.RepositoriesFacts: [repo_facts]})
+    ctx = _CmdRecorderContext(raise_exc=_cpe_with_stderr('some unrelated dnf error'))
+
+    with pytest.raises(StopActorExecutionError) as err:
+        tus_userspacegen.prepare_target_userspace(ctx, '/u', ['BaseOS'], ['pkg'])
+
+    assert 'repository configuration file' in err.value.details['hint']
+
+
+def test_prepare_target_userspace_centos_to_rhel_hint(monkeypatch):
+    _patch_prepare_env(monkeypatch, source_distro='centos', target_distro='rhel')
+    ctx = _CmdRecorderContext(raise_exc=_cpe_with_stderr('some unrelated dnf error'))
+
+    with pytest.raises(StopActorExecutionError) as err:
+        tus_userspacegen.prepare_target_userspace(ctx, '/u', ['BaseOS'], ['pkg'])
+
+    assert '--target-version' in err.value.details['hint']
+
+
+def test__inhibit_on_duplicate_repos(monkeypatch):
+    monkeypatch.setattr(tus_userspacegen.api, 'current_logger', logger_mocked())
+    monkeypatch.setattr(reporting, 'create_report', create_report_mocked())
+    monkeypatch.setattr(
+        repofileutils, 'get_duplicate_repositories',
+        lambda repofiles: {'dup-repo': ['/etc/yum.repos.d/a.repo', '/etc/yum.repos.d/b.repo']})
+
+    tus_userspacegen._inhibit_on_duplicate_repos([])
+
+    assert reporting.create_report.called == 1
+    report = reporting.create_report.reports[0]
+    assert report['title'] == 'A YUM/DNF repository defined multiple times'
+    assert reporting.Groups.INHIBITOR in report['groups']
+    assert report['severity'] == reporting.Severity.MEDIUM
+    assert tus_userspacegen.api.current_logger.warnmsg
+
+
+def test__inhibit_on_duplicate_repos_no_duplicates(monkeypatch):
+    monkeypatch.setattr(tus_userspacegen.api, 'current_logger', logger_mocked())
+    monkeypatch.setattr(reporting, 'create_report', create_report_mocked())
+    monkeypatch.setattr(repofileutils, 'get_duplicate_repositories', lambda repofiles: {})
+
+    tus_userspacegen._inhibit_on_duplicate_repos([])
+
+    assert reporting.create_report.called == 0
+    assert not tus_userspacegen.api.current_logger.warnmsg
+
+
+@pytest.mark.parametrize('skip_rhsm', [False, True])
+def test__prep_repository_access(monkeypatch, skip_rhsm):
+    monkeypatch.setattr(tus_userspacegen.api, 'current_logger', logger_mocked())
+    monkeypatch.setattr(tus_userspacegen.rhsm, 'skip_rhsm', lambda: skip_rhsm)
+
+    copy_cert_calls = []
+    monkeypatch.setattr(tus_userspacegen, '_copy_certificates',
+                        lambda ctx, tu: copy_cert_calls.append((ctx, tu)))
+    monkeypatch.setattr(tus_userspacegen.mounting, 'NspawnActions', _DummyCM)
+    monkeypatch.setattr(tus_userspacegen, '_get_files_owned_by_rpms', lambda ctx, path: ['owned.repo'])
+
+    runs = []
+    monkeypatch.setattr(tus_userspacegen, 'run', lambda cmd, *a, **k: runs.append(list(cmd)))
+
+    class Ctx:
+        base_dir = '/scratch'
+
+        def __init__(self):
+            self.copytree_from_calls = []
+
+        def copytree_from(self, src, dst):
+            self.copytree_from_calls.append((src, dst))
+
+    ctx = Ctx()
+    tus_userspacegen._prep_repository_access(ctx, '/target')
+
+    # certificates are always copied into the userspace
+    assert copy_cert_calls == [(ctx, '/target')]
+    # CA trust is always refreshed in the chroot
+    assert ['chroot', '/target', '/bin/bash', '-c', 'su - -c update-ca-trust'] in runs
+    # rhsm config is copied only when NOT skipping rhsm
+    assert (('/etc/rhsm', '/target/etc/rhsm') in ctx.copytree_from_calls) == (not skip_rhsm)
+    # the scratch yum.repos.d is always copied into the target userspace
+    assert ('/etc/yum.repos.d', '/target/etc/yum.repos.d') in ctx.copytree_from_calls
+    # the target yum.repos.d is backed up, the rpm-owned file restored, backup removed - in order
+    mv_backup = ['mv', '/target/etc/yum.repos.d', '/target/etc/yum.repos.d.backup']
+    mv_owned = ['mv', '/target/etc/yum.repos.d.backup/owned.repo', '/target/etc/yum.repos.d/owned.repo']
+    rm_backup = ['rm', '-rf', '/target/etc/yum.repos.d.backup']
+    assert mv_backup in runs and mv_owned in runs and rm_backup in runs
+    assert runs.index(mv_backup) < runs.index(mv_owned) < runs.index(rm_backup)
+
+
+@pytest.mark.xfail(strict=True, reason=(
+    'CARVE-OUT (frozen): the _copy_certificates symlink loop never advances '
+    '`pointee` (re-reads src_path each iteration), so a valid multi-hop '
+    'RPM-owned symlink under /etc/pki is misclassified as broken and skipped. '
+    'This asserts the CORRECT behavior and must fail until the frozen bug is '
+    'fixed (intentionally out of scope for this redesign).'))
+def test__copy_certificates_multihop_symlink(monkeypatch, tmp_path):
+    target_userspace = str(tmp_path / 'target')
+    target_pki_tls = os.path.join(target_userspace, 'etc', 'pki', 'tls')
+    backup_pki_tls = os.path.join(target_userspace, 'etc', 'pki.backup', 'tls')
+    os.makedirs(target_pki_tls)
+    os.makedirs(backup_pki_tls)
+
+    # A valid 2-hop chain: backup/tls/multi.pem -> /etc/pki/tls/hop1.pem -> real.pem
+    real_pem = os.path.join(target_pki_tls, 'real.pem')
+    with open(real_pem, 'w') as fobj:
+        fobj.write('cert')
+    os.symlink('real.pem', os.path.join(target_pki_tls, 'hop1.pem'))
+    src_path = os.path.join(backup_pki_tls, 'multi.pem')
+    os.symlink('/etc/pki/tls/hop1.pem', src_path)
+
+    monkeypatch.setattr(tus_userspacegen.api, 'current_logger', logger_mocked())
+    monkeypatch.setattr(tus_userspacegen.mounting, 'NspawnActions', _DummyCM)
+    monkeypatch.setattr(tus_userspacegen, '_get_files_owned_by_rpms',
+                        lambda ctx, path, recursive=False: ['tls/multi.pem'])
+    monkeypatch.setattr(tus_userspacegen, '_mkdir_with_copied_mode', lambda path, mode_from: None)
+    monkeypatch.setattr(tus_userspacegen, '_copy_decouple', lambda src, dst: None)
+
+    runs = []
+    monkeypatch.setattr(tus_userspacegen, 'run', lambda cmd, *a, **k: runs.append(list(cmd)))
+
+    tus_userspacegen._copy_certificates(None, target_userspace)
+
+    dst_path = os.path.join(target_userspace, 'etc', 'pki', 'tls', 'multi.pem')
+    # CORRECT behavior: the multi-hop RPM-owned symlink is copied, not skipped ...
+    assert ['cp', '-R', '--preserve=all', src_path, dst_path] in runs
+    # ... and no broken-symlink warning is emitted for it.
+    assert not any('broken symlink' in msg for msg in tus_userspacegen.api.current_logger.warnmsg)
