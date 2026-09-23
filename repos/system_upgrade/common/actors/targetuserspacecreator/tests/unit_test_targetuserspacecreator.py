@@ -1079,16 +1079,17 @@ def test_gather_target_repositories(monkeypatch):
     monkeypatch.setattr(tus_userspacegen.api, 'current_actor', CurrentActorMocked())
     monkeypatch.setattr(rhsm, 'skip_rhsm', lambda: False)
     monkeypatch.setattr(
-        tus_userspacegen, '_get_distro_available_repoids',
+        tus_userspacegen.tus_targetrepos, '_get_distro_available_repoids',
         lambda dummy_context, dummy_indata: {'repoidX', 'repoidY', 'repoidZ'})
-    monkeypatch.setattr(tus_userspacegen, '_get_all_available_repoids', lambda dummy_context: {'repoidCustom'})
+    monkeypatch.setattr(
+        tus_userspacegen.tus_targetrepos, '_get_all_available_repoids', lambda dummy_context: {'repoidCustom'})
     monkeypatch.setattr(tus_userspacegen.api, 'consume', lambda x: iter([models.TargetRepositories(
         rhel_repos=[],
         distro_repos=[models.DistroTargetRepository(repoid='repoidX'),
                       models.DistroTargetRepository(repoid='repoidY')],
         custom_repos=[models.CustomTargetRepository(repoid='repoidCustom')])]))
 
-    target_repoids = tus_userspacegen.gather_target_repositories(None, None)
+    target_repoids = tus_userspacegen.tus_targetrepos.select_target_repositories(None, None)
 
     assert target_repoids == {'repoidX', 'repoidY', 'repoidCustom'}
 
@@ -1101,16 +1102,17 @@ def test_gather_target_repositories_missing_custom(monkeypatch):
     monkeypatch.setattr(reporting, 'create_report', create_report_mocked())
     monkeypatch.setattr(rhsm, 'skip_rhsm', lambda: False)
     monkeypatch.setattr(
-        tus_userspacegen, '_get_distro_available_repoids',
+        tus_userspacegen.tus_targetrepos, '_get_distro_available_repoids',
         lambda dummy_context, dummy_indata: {'repoidX'})
-    monkeypatch.setattr(tus_userspacegen, '_get_all_available_repoids', lambda dummy_context: {'repoidX'})
+    monkeypatch.setattr(
+        tus_userspacegen.tus_targetrepos, '_get_all_available_repoids', lambda dummy_context: {'repoidX'})
     monkeypatch.setattr(tus_userspacegen.api, 'consume', lambda x: iter([models.TargetRepositories(
         rhel_repos=[],
         distro_repos=[models.DistroTargetRepository(repoid='repoidX')],
         custom_repos=[models.CustomTargetRepository(repoid='missing-custom')])]))
 
     with pytest.raises(StopActorExecution):
-        tus_userspacegen.gather_target_repositories(None, None)
+        tus_userspacegen.tus_targetrepos.select_target_repositories(None, None)
 
     assert reporting.create_report.called == 1
     report = reporting.create_report.reports[0]
@@ -1126,7 +1128,7 @@ def test_gather_target_repositories_none_available(monkeypatch):
     monkeypatch.setattr(rhsm, 'get_available_repo_ids', lambda x: [])
     monkeypatch.setattr(rhsm, 'skip_rhsm', lambda: False)
     with pytest.raises(StopActorExecution):
-        tus_userspacegen.gather_target_repositories(None, None)
+        tus_userspacegen.tus_targetrepos.select_target_repositories(None, None)
         assert mocked_produce.called
         reports = [m.report for m in mocked_produce.model_instances if isinstance(m, reporting.Report)]
         inhibitors = [m for m in reports if 'INHIBITOR' in m.get('flags', ())]
@@ -1142,9 +1144,9 @@ def test_gather_target_repositories_rhui(monkeypatch):
     )
 
     monkeypatch.setattr(tus_userspacegen.api, 'current_actor', CurrentActorMocked())
-    monkeypatch.setattr(tus_userspacegen, '_get_all_available_repoids', lambda x: [])
+    monkeypatch.setattr(tus_userspacegen.tus_targetrepos, '_get_all_available_repoids', lambda x: [])
     monkeypatch.setattr(
-        tus_userspacegen,
+        tus_userspacegen.tus_targetrepos,
         "_get_distro_available_repoids",
         lambda dummy_context, dummy_indata: {"rhui-1", "rhui-2", "rhui-3"},
     )
@@ -1163,7 +1165,7 @@ def test_gather_target_repositories_rhui(monkeypatch):
             )
             ])
     )
-    target_repoids = tus_userspacegen.gather_target_repositories(None, indata)
+    target_repoids = tus_userspacegen.tus_targetrepos.select_target_repositories(None, indata)
     assert target_repoids == set(['rhui-1', 'rhui-2'])
 
 
@@ -1189,7 +1191,7 @@ def test_gather_target_repositories_baseos_appstream_not_available(monkeypatch):
         custom_repos=[models.CustomTargetRepository(repoid='repoidCustom')])]))
 
     with pytest.raises(StopActorExecution):
-        tus_userspacegen.gather_target_repositories(None, indata)
+        tus_userspacegen.tus_targetrepos.select_target_repositories(None, indata)
     assert mocked_produce.called
     reports = [m.report for m in mocked_produce.model_instances if isinstance(m, reporting.Report)]
     inhibitors = [m for m in reports if 'inhibitor' in m.get('groups', ())]
@@ -1205,7 +1207,7 @@ def test_gather_target_repositories_baseos_appstream_not_available(monkeypatch):
                     models.RHELTargetRepository(repoid='repoidA')],
         custom_repos=[models.CustomTargetRepository(repoid='repoidCustom')])]))
     with pytest.raises(StopActorExecution):
-        tus_userspacegen.gather_target_repositories(None, indata)
+        tus_userspacegen.tus_targetrepos.select_target_repositories(None, indata)
     reports = [m.report for m in mocked_produce.model_instances if isinstance(m, reporting.Report)]
     inhibitors = [m for m in reports if 'inhibitor' in m.get('groups', ())]
     assert len(inhibitors) == 1
@@ -1219,7 +1221,7 @@ def test_gather_target_repositories_baseos_appstream_not_available(monkeypatch):
                     models.RHELTargetRepository(repoid='repoidA')],
         custom_repos=[models.CustomTargetRepository(repoid='repoidCustom')])]))
     with pytest.raises(StopActorExecution):
-        tus_userspacegen.gather_target_repositories(None, indata)
+        tus_userspacegen.tus_targetrepos.select_target_repositories(None, indata)
     reports = [m.report for m in mocked_produce.model_instances if isinstance(m, reporting.Report)]
     inhibitors = [m for m in reports if 'inhibitor' in m.get('groups', ())]
     assert len(inhibitors) == 1
@@ -1240,7 +1242,7 @@ def test__get_distro_available_repoids_norhsm_norhui(monkeypatch):
 
     indata = testInData(_PACKAGES_MSGS, None, None, _XFS_MSG, _STORAGEINFO_MSG, None)
     # NOTE: context is not used without rhsm, for simplicity setting to None
-    repoids = tus_userspacegen._get_distro_available_repoids(None, indata)
+    repoids = tus_userspacegen.tus_targetrepos._get_distro_available_repoids(None, indata)
     assert repoids == set()
 
 
@@ -1272,12 +1274,12 @@ def test__get_distro_available_repoids_nobaserepos_inhibit(
 
     if src_distro == "centos" and src_ver == "8.10" or src_distro != dst_distro:
         # should not raise on CS 8to9 and when converting
-        tus_userspacegen._get_distro_available_repoids(None, indata)
+        tus_userspacegen.tus_targetrepos._get_distro_available_repoids(None, indata)
         return
 
     with pytest.raises(StopActorExecution):
         # NOTE: context is not used without rhsm, for simplicity setting to None
-        tus_userspacegen._get_distro_available_repoids(None, indata)
+        tus_userspacegen.tus_targetrepos._get_distro_available_repoids(None, indata)
 
         # TODO adjust the asserts when the report is made distro agnostic
         assert reporting.create_report.called == 1
@@ -1490,7 +1492,7 @@ def test_if_adjust_dnf_stream_variable_only_for_centos(
     monkeypatch.setattr(rhsm, 'switch_certificate', do_nothing)
     monkeypatch.setattr(tus_userspacegen.tus_contentaccess, '_install_custom_repofiles', do_nothing)
     monkeypatch.setattr(tus_userspacegen.tus_contentaccess, 'adjust_dnf_stream_variable', mock_adjust_stream_variable)
-    monkeypatch.setattr(tus_userspacegen, 'gather_target_repositories', do_nothing)
+    monkeypatch.setattr(tus_userspacegen.tus_targetrepos, 'select_target_repositories', do_nothing)
 
     adjust_called = False
 
@@ -1667,7 +1669,7 @@ def test__inhibit_on_duplicate_repos(monkeypatch):
         repofileutils, 'get_duplicate_repositories',
         lambda repofiles: {'dup-repo': ['/etc/yum.repos.d/a.repo', '/etc/yum.repos.d/b.repo']})
 
-    tus_userspacegen._inhibit_on_duplicate_repos([])
+    tus_userspacegen.tus_targetrepos._inhibit_on_duplicate_repos([])
 
     assert reporting.create_report.called == 1
     report = reporting.create_report.reports[0]
@@ -1682,7 +1684,7 @@ def test__inhibit_on_duplicate_repos_no_duplicates(monkeypatch):
     monkeypatch.setattr(reporting, 'create_report', create_report_mocked())
     monkeypatch.setattr(repofileutils, 'get_duplicate_repositories', lambda repofiles: {})
 
-    tus_userspacegen._inhibit_on_duplicate_repos([])
+    tus_userspacegen.tus_targetrepos._inhibit_on_duplicate_repos([])
 
     assert reporting.create_report.called == 0
     assert not tus_userspacegen.api.current_logger.warnmsg
