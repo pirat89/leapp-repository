@@ -1052,7 +1052,7 @@ def test_consume_data(monkeypatch, raised, no_rhsm, testdata):
     if not custom_repofiles:
         custom_repofiles = []
     if not raised:
-        result = tus_userspacegen._InputData()
+        result = tus_userspacegen.tus_inputdata.InputData()
         assert result.packages == _exp_pkgs
         assert _cfiles2set(result.files) == _cfiles2set(_exp_files)
         assert result.rhsm_info == testdata.rhsm_info
@@ -1064,7 +1064,7 @@ def test_consume_data(monkeypatch, raised, no_rhsm, testdata):
         assert not tus_userspacegen.api.current_logger.errmsg
     else:
         with pytest.raises(raised[0]) as err:
-            tus_userspacegen._InputData()
+            tus_userspacegen.tus_inputdata.InputData()
         if isinstance(err.value, StopActorExecutionError):
             assert raised[1] in err.value.message
         else:
@@ -1321,7 +1321,7 @@ def mocked_consume_data():
 )
 def test_perform_ok(monkeypatch, distro, cert_path):
     repoids = ['repoidX', 'repoidY']
-    monkeypatch.setattr(tus_userspacegen, '_InputData', mocked_consume_data)
+    monkeypatch.setattr(tus_userspacegen.tus_inputdata, 'InputData', mocked_consume_data)
     monkeypatch.setattr(tus_userspacegen, '_get_product_certificate_path', lambda: cert_path)
     monkeypatch.setattr(overlaygen, 'create_source_overlay', MockedMountingBase)
     monkeypatch.setattr(tus_userspacegen, '_gather_target_repositories', lambda *x: repoids)
