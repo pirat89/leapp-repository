@@ -260,8 +260,8 @@ def _patch_setup_env(monkeypatch):
     monkeypatch.setattr(api, 'current_logger', logger_mocked())
     monkeypatch.setattr(api, 'current_actor', CurrentActorMocked(dst_ver='9.4'))
     monkeypatch.setattr(tus_userspacegen, 'get_target_major_version', lambda: '9')
-    monkeypatch.setattr(tus_userspacegen, '_get_target_userspace', lambda: '/target')
-    monkeypatch.setattr(tus_userspacegen, '_create_target_userspace_directories', lambda path: None)
+    monkeypatch.setattr(tus_userspacegen.tus_layout, 'target_userspace_path', lambda: '/target')
+    monkeypatch.setattr(tus_userspacegen.tus_layout, 'create_target_userspace_directories', lambda path: None)
 
 
 def test_r5_no_rhui_info_is_noop(monkeypatch):
@@ -399,7 +399,7 @@ def test_r5_cleanup_removes_injected_unowned_setup_files(monkeypatch):
 # ---------------------------------------------------------------------------
 def test_r6_removes_unowned_repofiles_keeps_owned(monkeypatch):
     monkeypatch.setattr(api, 'current_logger', logger_mocked())
-    monkeypatch.setattr(tus_userspacegen, '_get_target_userspace', lambda: '/target')
+    monkeypatch.setattr(tus_userspacegen.tus_layout, 'target_userspace_path', lambda: '/target')
     monkeypatch.setattr(os.path, 'isdir', lambda path: False)
     monkeypatch.setattr(os.path, 'isfile', lambda path: path.endswith('.repo'))
 

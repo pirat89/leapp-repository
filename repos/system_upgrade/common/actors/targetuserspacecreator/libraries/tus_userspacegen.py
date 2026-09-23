@@ -5,7 +5,7 @@ import shutil
 
 from leapp import reporting
 from leapp.exceptions import StopActorExecution, StopActorExecutionError
-from leapp.libraries.actor import constants
+from leapp.libraries.actor import tus_layout
 from leapp.libraries.common import distro, mounting, overlaygen, repofileutils, rhsm, utils
 from leapp.libraries.common.config import (
     get_env,
@@ -213,7 +213,7 @@ def prepare_target_userspace(context, userspace_dir, enabled_repos, packages):
     _backup_to_persistent_package_cache(userspace_dir)
 
     run(['rm', '-rf', userspace_dir])
-    _create_target_userspace_directories(userspace_dir)
+    tus_layout.create_target_userspace_directories(userspace_dir)
 
     target_major_version = get_target_major_version()
     install_root_dir = '/el{}target'.format(target_major_version)
@@ -755,23 +755,6 @@ def _get_product_certificate_path():
     return cert_path
 
 
-def _create_target_userspace_directories(target_userspace):
-    api.current_logger().debug('Creating target userspace directories.')
-    try:
-        utils.makedirs(target_userspace)
-        api.current_logger().debug('Done creating target userspace directories.')
-    except OSError:
-        api.current_logger().error(
-            'Failed to create temporary target userspace directories %s', target_userspace, exc_info=True)
-        # This is an attempt for giving the user a chance to resolve it on their own
-        raise StopActorExecutionError(
-            message='Failed to prepare environment for package download while creating directories.',
-            details={
-                'hint': 'Please ensure that {directory} is empty and modifiable.'.format(directory=target_userspace)
-            }
-        )
-
-
 def _inhibit_on_duplicate_repos(repofiles):
     """
     Inhibit the upgrade if any repoid is defined multiple times.
@@ -1209,12 +1192,8 @@ def _copy_files(context, files):
             context.copy_to(file_task.src, file_task.dst)
 
 
-def _get_target_userspace():
-    return constants.TARGET_USERSPACE.format(get_target_major_version())
-
-
 def _remove_injected_repofiles_from_our_rhui_packages(target_userspace_ctx, rhui_setup_info):
-    target_userspace_path = _get_target_userspace()
+    target_userspace_path = tus_layout.target_userspace_path()
     for copy in rhui_setup_info.preinstall_tasks.files_to_copy_into_overlay:
         dst_in_container = get_copy_location_from_copy_in_task(target_userspace_path, copy)
         dst_in_container = dst_in_container.strip('/')
@@ -1236,13 +1215,13 @@ def _remove_injected_repofiles_from_our_rhui_packages(target_userspace_ctx, rhui
 
 def _create_target_userspace(context, indata, packages, files, target_repoids):
     """Create the target userspace."""
-    target_path = _get_target_userspace()
+    target_path = tus_layout.target_userspace_path()
     prepare_target_userspace(context, target_path, target_repoids, list(packages))
     _prep_repository_access(context, target_path)
 
     with mounting.NspawnActions(base_dir=target_path) as target_context:
         _copy_files(target_context, files)
-    dnfplugin.install(_get_target_userspace())
+    dnfplugin.install(tus_layout.target_userspace_path())
 
     # If we used only repofiles from leapp-rhui-<provider> then remove these as they provide
     # duplicit definitions as the target clients already installed in the target container
@@ -1256,7 +1235,7 @@ def _create_target_userspace(context, indata, packages, files, target_repoids):
             _remove_injected_repofiles_from_our_rhui_packages(context, setup_info)
 
     # and do not forget to set the rhsm into the container mode again
-    with mounting.NspawnActions(_get_target_userspace()) as target_context:
+    with mounting.NspawnActions(tus_layout.target_userspace_path()) as target_context:
         rhsm.set_container_mode(target_context)
 
 
@@ -1292,8 +1271,8 @@ def setup_target_rhui_access_if_needed(context, indata):
         return
 
     target_major_version = get_target_major_version()
-    userspace_dir = _get_target_userspace()
-    _create_target_userspace_directories(userspace_dir)
+    userspace_dir = tus_layout.target_userspace_path()
+    tus_layout.create_target_userspace_directories(userspace_dir)
 
     setup_info = indata.rhui_info.target_client_setup_info
     _apply_rhui_access_preinstall_tasks(context, setup_info)
@@ -1401,12 +1380,15 @@ def perform():
     # in unit tests the LEAPP_DEVEL_SKIP_RHSM envar anymore
     _check_deprecated_rhsm_skip()
 
+    scratch_dir = os.getenv('LEAPP_CONTAINER_ROOT', '/var/lib/leapp/scratch')
+    mounts_dir = os.path.join(scratch_dir, 'mounts')
+
     indata = _InputData()
     prod_cert_path = _get_product_certificate_path()
-    reserve_space = overlaygen.get_recommended_leapp_free_space(_get_target_userspace())
+    reserve_space = overlaygen.get_recommended_leapp_free_space(tus_layout.target_userspace_path())
     with overlaygen.create_source_overlay(
-            mounts_dir=constants.MOUNTS_DIR,
-            scratch_dir=constants.SCRATCH_DIR,
+            mounts_dir=mounts_dir,
+            scratch_dir=scratch_dir,
             storage_info=indata.storage_info,
             xfs_info=indata.xfs_info,
             scratch_reserve=reserve_space) as overlay:
@@ -1437,6 +1419,6 @@ def perform():
                 api.produce(UsedTargetRepositories(
                     repos=[UsedTargetRepository(repoid=repo) for repo in target_repoids]))
                 api.produce(TargetUserSpaceInfo(
-                    path=_get_target_userspace(),
-                    scratch=constants.SCRATCH_DIR,
-                    mounts=constants.MOUNTS_DIR))
+                    path=tus_layout.target_userspace_path(),
+                    scratch=scratch_dir,
+                    mounts=mounts_dir))

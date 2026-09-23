@@ -1588,7 +1588,7 @@ def _patch_prepare_env(monkeypatch, nogpgcheck=False, skip_rhsm=False, verbose=F
     monkeypatch.setattr(tus_userspacegen, 'run', lambda *a, **k: {'stdout': '', 'stderr': ''})
     monkeypatch.setattr(tus_userspacegen, '_backup_to_persistent_package_cache', lambda d: None)
     monkeypatch.setattr(tus_userspacegen, '_restore_persistent_package_cache', lambda d: None)
-    monkeypatch.setattr(tus_userspacegen, '_create_target_userspace_directories', lambda d: None)
+    monkeypatch.setattr(tus_userspacegen.tus_layout, 'create_target_userspace_directories', lambda d: None)
     monkeypatch.setattr(tus_userspacegen, '_import_gpg_keys', lambda *a, **k: None)
     monkeypatch.setattr(tus_userspacegen.mounting, 'BindMount', _DummyCM)
     monkeypatch.setattr(tus_userspacegen, 'is_nogpgcheck_set', lambda: nogpgcheck)
