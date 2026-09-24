@@ -10,7 +10,6 @@ from leapp.libraries.actor import (
     tus_userspacebuild
 )
 from leapp.libraries.common import mounting, overlaygen, repofileutils, rhsm
-from leapp.libraries.common.config import get_env
 from leapp.libraries.stdlib import api
 from leapp.models import TMPTargetRepositoriesFacts  # deprecated all the time
 from leapp.models import (
@@ -46,20 +45,6 @@ from leapp.utils.deprecation import suppress_deprecation
 # Issue: #486
 
 
-def _check_deprecated_rhsm_skip():
-    # we do not plan to cover this case by tests as it is purely
-    # devel/testing stuff, that becomes deprecated now
-    # just log the warning now (better than nothing?); deprecation process will
-    # be specified in close future
-    if get_env('LEAPP_DEVEL_SKIP_RHSM', '0') == '1':
-        api.current_logger().warning(
-            'The LEAPP_DEVEL_SKIP_RHSM has been deprecated. Use'
-            ' LEAPP_NO_RHSM instead or use the --no-rhsm option for'
-            ' leapp. as well custom repofile has not been defined.'
-            ' Please read documentation about new "skip rhsm" solution.'
-        )
-
-
 def _gather_target_repositories(context, indata):
     """
     Establish content access in the container, then gather the target repoids.
@@ -79,10 +64,6 @@ def _gather_target_repositories(context, indata):
 
 @suppress_deprecation(TMPTargetRepositoriesFacts)
 def perform():
-    # NOTE: this one action is out of unit-tests completely; we do not use
-    # in unit tests the LEAPP_DEVEL_SKIP_RHSM envar anymore
-    _check_deprecated_rhsm_skip()
-
     scratch_dir = os.getenv('LEAPP_CONTAINER_ROOT', '/var/lib/leapp/scratch')
     mounts_dir = os.path.join(scratch_dir, 'mounts')
 

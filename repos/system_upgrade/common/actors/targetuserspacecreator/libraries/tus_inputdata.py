@@ -10,7 +10,6 @@ the rest of the actor never calls api.consume for these messages again.
 from leapp.exceptions import StopActorExecution, StopActorExecutionError
 from leapp.libraries.common import rhsm
 from leapp.libraries.stdlib import api
-from leapp.models import RequiredTargetUserspacePackages  # deprecated
 from leapp.models import (
     CustomTargetRepositoryFile,
     RHSMInfo,
@@ -19,7 +18,6 @@ from leapp.models import (
     TargetUserSpacePreupgradeTasks,
     XFSPresence
 )
-from leapp.utils.deprecation import suppress_deprecation
 
 
 class InputData:
@@ -44,7 +42,6 @@ class InputData:
     def __init__(self):
         self._consume_data()
 
-    @suppress_deprecation(RequiredTargetUserspacePackages)
     def _consume_data(self):
         """
         Wrapper function to consume majority input data.
@@ -67,9 +64,6 @@ class InputData:
         for task in api.consume(TargetUserSpacePreupgradeTasks):
             self.packages.update(task.install_rpms)
             _update_files(task.copy_files)
-
-        for message in api.consume(RequiredTargetUserspacePackages):
-            self.packages.update(message.packages)
 
         # Get the RHSM information (available repos, attached SKUs, etc.) of the source system
         self.rhsm_info = next(api.consume(RHSMInfo), None)
