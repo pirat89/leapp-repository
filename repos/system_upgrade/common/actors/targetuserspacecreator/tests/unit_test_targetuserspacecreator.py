@@ -838,10 +838,10 @@ def test_copy_decouple(monkeypatch, temp_directory_layout, initial_structure, ex
             stderr=subprocess.STDOUT,
         )
 
-    monkeypatch.setattr(tus_userspacegen, 'run', run_mocked)
+    monkeypatch.setattr(tus_userspacegen.tus_repoaccess, 'run', run_mocked)
     expected_dir = temp_directory_layout / 'expected' / 'dir'
     expected_dir.mkdir()
-    tus_userspacegen._copy_decouple(
+    tus_userspacegen.tus_repoaccess._copy_decouple(
             str(temp_directory_layout / 'initial' / 'dir'),
             str(expected_dir),
             )
@@ -1379,7 +1379,7 @@ def test__get_files_owned_by_rpms(monkeypatch):
     owned_fullpath = [os.path.join(search_dir, f) for f in owned]
     context = _MockContext('/base/dir', owned_fullpath)
 
-    out = tus_userspacegen._get_files_owned_by_rpms(context, '/some/path', recursive=False)
+    out = tus_userspacegen.tus_repoaccess._get_files_owned_by_rpms(context, '/some/path', recursive=False)
     assert sorted(owned) == sorted(out)
 
 
@@ -1428,7 +1428,7 @@ def test__get_files_owned_by_rpms_recursive(monkeypatch):
     owned_fullpath = [os.path.join(search_dir, f) for f in owned]
     context = _MockContext('/base/dir', owned_fullpath)
 
-    out = tus_userspacegen._get_files_owned_by_rpms(context, search_dir, recursive=True)
+    out = tus_userspacegen.tus_repoaccess._get_files_owned_by_rpms(context, search_dir, recursive=True)
     # any directory-hash directory should be skipped
     assert sorted(owned[0:4]) == sorted(out)
 
@@ -1504,7 +1504,7 @@ def test_if_adjust_dnf_stream_variable_only_for_centos(
 # Behavior-anchored safety net (added for the redesign):
 #   - dnf install command shape + the 4 failure-hint branches
 #   - the duplicate-repos inhibitor
-#   - _prep_repository_access cert/repo file merge
+#   - repoaccess.prep_repository_access cert/repo file merge
 #   - the frozen _copy_certificates multi-hop symlink carve-out (xfail)
 # All assertions target observable behavior (recorded commands / produced
 # reports), never internal helper names, so they survive the module reshuffle.
@@ -1696,13 +1696,13 @@ def test__prep_repository_access(monkeypatch, skip_rhsm):
     monkeypatch.setattr(tus_userspacegen.rhsm, 'skip_rhsm', lambda: skip_rhsm)
 
     copy_cert_calls = []
-    monkeypatch.setattr(tus_userspacegen, '_copy_certificates',
+    monkeypatch.setattr(tus_userspacegen.tus_repoaccess, '_copy_certificates',
                         lambda ctx, tu: copy_cert_calls.append((ctx, tu)))
     monkeypatch.setattr(tus_userspacegen.mounting, 'NspawnActions', _DummyCM)
-    monkeypatch.setattr(tus_userspacegen, '_get_files_owned_by_rpms', lambda ctx, path: ['owned.repo'])
+    monkeypatch.setattr(tus_userspacegen.tus_repoaccess, '_get_files_owned_by_rpms', lambda ctx, path: ['owned.repo'])
 
     runs = []
-    monkeypatch.setattr(tus_userspacegen, 'run', lambda cmd, *a, **k: runs.append(list(cmd)))
+    monkeypatch.setattr(tus_userspacegen.tus_repoaccess, 'run', lambda cmd, *a, **k: runs.append(list(cmd)))
 
     class Ctx:
         base_dir = '/scratch'
@@ -1714,7 +1714,7 @@ def test__prep_repository_access(monkeypatch, skip_rhsm):
             self.copytree_from_calls.append((src, dst))
 
     ctx = Ctx()
-    tus_userspacegen._prep_repository_access(ctx, '/target')
+    tus_userspacegen.tus_repoaccess.prep_repository_access(ctx, '/target')
 
     # certificates are always copied into the userspace
     assert copy_cert_calls == [(ctx, '/target')]
@@ -1755,15 +1755,15 @@ def test__copy_certificates_multihop_symlink(monkeypatch, tmp_path):
 
     monkeypatch.setattr(tus_userspacegen.api, 'current_logger', logger_mocked())
     monkeypatch.setattr(tus_userspacegen.mounting, 'NspawnActions', _DummyCM)
-    monkeypatch.setattr(tus_userspacegen, '_get_files_owned_by_rpms',
+    monkeypatch.setattr(tus_userspacegen.tus_repoaccess, '_get_files_owned_by_rpms',
                         lambda ctx, path, recursive=False: ['tls/multi.pem'])
-    monkeypatch.setattr(tus_userspacegen, '_mkdir_with_copied_mode', lambda path, mode_from: None)
-    monkeypatch.setattr(tus_userspacegen, '_copy_decouple', lambda src, dst: None)
+    monkeypatch.setattr(tus_userspacegen.tus_repoaccess, '_mkdir_with_copied_mode', lambda path, mode_from: None)
+    monkeypatch.setattr(tus_userspacegen.tus_repoaccess, '_copy_decouple', lambda src, dst: None)
 
     runs = []
-    monkeypatch.setattr(tus_userspacegen, 'run', lambda cmd, *a, **k: runs.append(list(cmd)))
+    monkeypatch.setattr(tus_userspacegen.tus_repoaccess, 'run', lambda cmd, *a, **k: runs.append(list(cmd)))
 
-    tus_userspacegen._copy_certificates(None, target_userspace)
+    tus_userspacegen.tus_repoaccess._copy_certificates(None, target_userspace)
 
     dst_path = os.path.join(target_userspace, 'etc', 'pki', 'tls', 'multi.pem')
     # CORRECT behavior: the multi-hop RPM-owned symlink is copied, not skipped ...
