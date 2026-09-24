@@ -10,7 +10,7 @@ import pytest
 
 from leapp import models, reporting
 from leapp.exceptions import StopActorExecution, StopActorExecutionError
-from leapp.libraries.actor import tus_userspacegen
+from leapp.libraries.actor import tus_repoaccess, tus_userspacebuild, tus_userspacegen
 from leapp.libraries.common import distro, overlaygen, repofileutils, rhsm
 from leapp.libraries.common.testutils import create_report_mocked, CurrentActorMocked, logger_mocked, produce_mocked
 from leapp.libraries.stdlib import api, CalledProcessError
@@ -824,10 +824,10 @@ def test_copy_decouple(monkeypatch, temp_directory_layout, initial_structure, ex
             stderr=subprocess.STDOUT,
         )
 
-    monkeypatch.setattr(tus_userspacegen.tus_repoaccess, 'run', run_mocked)
+    monkeypatch.setattr(tus_repoaccess, 'run', run_mocked)
     expected_dir = temp_directory_layout / 'expected' / 'dir'
     expected_dir.mkdir()
-    tus_userspacegen.tus_repoaccess._copy_decouple(
+    tus_repoaccess._copy_decouple(
             str(temp_directory_layout / 'initial' / 'dir'),
             str(expected_dir),
             )
@@ -1286,8 +1286,12 @@ def test_perform_ok(monkeypatch, distro):
     monkeypatch.setattr(tus_userspacegen.tus_inputdata, 'InputData', mocked_consume_data)
     monkeypatch.setattr(overlaygen, 'create_source_overlay', MockedMountingBase)
     monkeypatch.setattr(tus_userspacegen, '_gather_target_repositories', lambda *x: repoids)
-    monkeypatch.setattr(tus_userspacegen, '_create_target_userspace', lambda *x: None)
+    monkeypatch.setattr(tus_userspacebuild, 'build_target_userspace', lambda *x: None)
     monkeypatch.setattr(tus_userspacegen.tus_rhui, 'setup_target_rhui_access_if_needed', lambda *x: None)
+    # the RHUI cleanup + container-mode steps are lifted into perform() now
+    monkeypatch.setattr(tus_userspacegen.api, 'current_logger', logger_mocked())
+    monkeypatch.setattr(tus_userspacegen.mounting, 'NspawnActions', _DummyCM)
+    monkeypatch.setattr(tus_userspacegen.rhsm, 'set_container_mode', lambda *x: None)
     monkeypatch.setattr(tus_userspacegen.api, 'current_actor', CurrentActorMocked(release_id=distro))
     monkeypatch.setattr(tus_userspacegen.api, 'produce', produce_mocked())
     monkeypatch.setattr(repofileutils, 'get_repodirs', lambda: ['/etc/yum.repos.d'])
@@ -1338,7 +1342,7 @@ def test__get_files_owned_by_rpms(monkeypatch):
     owned_fullpath = [os.path.join(search_dir, f) for f in owned]
     context = _MockContext('/base/dir', owned_fullpath)
 
-    out = tus_userspacegen.tus_repoaccess._get_files_owned_by_rpms(context, '/some/path', recursive=False)
+    out = tus_repoaccess._get_files_owned_by_rpms(context, '/some/path', recursive=False)
     assert sorted(owned) == sorted(out)
 
 
@@ -1387,7 +1391,7 @@ def test__get_files_owned_by_rpms_recursive(monkeypatch):
     owned_fullpath = [os.path.join(search_dir, f) for f in owned]
     context = _MockContext('/base/dir', owned_fullpath)
 
-    out = tus_userspacegen.tus_repoaccess._get_files_owned_by_rpms(context, search_dir, recursive=True)
+    out = tus_repoaccess._get_files_owned_by_rpms(context, search_dir, recursive=True)
     # any directory-hash directory should be skipped
     assert sorted(owned[0:4]) == sorted(out)
 
@@ -1564,21 +1568,21 @@ def _expected_dnf_cmd(nogpgcheck, skip_rhsm, verbose, enabled_repos, packages,
 
 def _patch_prepare_env(monkeypatch, nogpgcheck=False, skip_rhsm=False, verbose=False,
                        source_distro='rhel', target_distro='rhel', consume_map=None):
-    monkeypatch.setattr(tus_userspacegen.api, 'current_actor', CurrentActorMocked(dst_ver='9.6'))
-    monkeypatch.setattr(tus_userspacegen.api, 'consume', _consume_by_model(consume_map or {}))
-    monkeypatch.setattr(tus_userspacegen, 'get_target_major_version', lambda: '9')
-    monkeypatch.setattr(tus_userspacegen, 'get_target_version', lambda: '9.6')
-    monkeypatch.setattr(tus_userspacegen, 'get_source_distro_id', lambda: source_distro)
-    monkeypatch.setattr(tus_userspacegen, 'get_target_distro_id', lambda: target_distro)
-    monkeypatch.setattr(tus_userspacegen, 'run', lambda *a, **k: {'stdout': '', 'stderr': ''})
-    monkeypatch.setattr(tus_userspacegen, '_backup_to_persistent_package_cache', lambda d: None)
-    monkeypatch.setattr(tus_userspacegen, '_restore_persistent_package_cache', lambda d: None)
-    monkeypatch.setattr(tus_userspacegen.tus_layout, 'create_target_userspace_directories', lambda d: None)
-    monkeypatch.setattr(tus_userspacegen, '_import_gpg_keys', lambda *a, **k: None)
-    monkeypatch.setattr(tus_userspacegen.mounting, 'BindMount', _DummyCM)
-    monkeypatch.setattr(tus_userspacegen, 'is_nogpgcheck_set', lambda: nogpgcheck)
-    monkeypatch.setattr(tus_userspacegen.rhsm, 'skip_rhsm', lambda: skip_rhsm)
-    monkeypatch.setattr(tus_userspacegen.config, 'is_verbose', lambda: verbose)
+    monkeypatch.setattr(tus_userspacebuild.api, 'current_actor', CurrentActorMocked(dst_ver='9.6'))
+    monkeypatch.setattr(tus_userspacebuild.api, 'consume', _consume_by_model(consume_map or {}))
+    monkeypatch.setattr(tus_userspacebuild, 'get_target_major_version', lambda: '9')
+    monkeypatch.setattr(tus_userspacebuild, 'get_target_version', lambda: '9.6')
+    monkeypatch.setattr(tus_userspacebuild, 'get_source_distro_id', lambda: source_distro)
+    monkeypatch.setattr(tus_userspacebuild, 'get_target_distro_id', lambda: target_distro)
+    monkeypatch.setattr(tus_userspacebuild, 'run', lambda *a, **k: {'stdout': '', 'stderr': ''})
+    monkeypatch.setattr(tus_userspacebuild, '_backup_to_persistent_package_cache', lambda d: None)
+    monkeypatch.setattr(tus_userspacebuild, '_restore_persistent_package_cache', lambda d: None)
+    monkeypatch.setattr(tus_userspacebuild.tus_layout, 'create_target_userspace_directories', lambda d: None)
+    monkeypatch.setattr(tus_userspacebuild, '_import_gpg_keys', lambda *a, **k: None)
+    monkeypatch.setattr(tus_userspacebuild.mounting, 'BindMount', _DummyCM)
+    monkeypatch.setattr(tus_userspacebuild, 'is_nogpgcheck_set', lambda: nogpgcheck)
+    monkeypatch.setattr(tus_userspacebuild.rhsm, 'skip_rhsm', lambda: skip_rhsm)
+    monkeypatch.setattr(tus_userspacebuild.config, 'is_verbose', lambda: verbose)
 
 
 @pytest.mark.parametrize('nogpgcheck', [False, True])
@@ -1590,7 +1594,7 @@ def test_prepare_target_userspace_dnf_command(monkeypatch, nogpgcheck, skip_rhsm
     enabled_repos = ['BaseOS', 'AppStream']
     packages = ['pkgA', 'pkgB']
 
-    tus_userspacegen.prepare_target_userspace(ctx, '/some/userspace', enabled_repos, list(packages))
+    tus_userspacebuild.prepare_target_userspace(ctx, '/some/userspace', enabled_repos, list(packages))
 
     assert len(ctx.commands) == 1
     assert ctx.commands[0] == _expected_dnf_cmd(
@@ -1600,12 +1604,12 @@ def test_prepare_target_userspace_dnf_command(monkeypatch, nogpgcheck, skip_rhsm
 def test_assemble_dnf_install_command_is_pure(monkeypatch):
     # The assembler is a pure list builder: unlike prepare_target_userspace it
     # needs no container, bind mount or gpg import - only the env/config lookups.
-    monkeypatch.setattr(tus_userspacegen.api, 'current_actor', CurrentActorMocked(dst_ver='9.6'))
-    monkeypatch.setattr(tus_userspacegen, 'is_nogpgcheck_set', lambda: False)
-    monkeypatch.setattr(tus_userspacegen.rhsm, 'skip_rhsm', lambda: True)
-    monkeypatch.setattr(tus_userspacegen.config, 'is_verbose', lambda: True)
+    monkeypatch.setattr(tus_userspacebuild.api, 'current_actor', CurrentActorMocked(dst_ver='9.6'))
+    monkeypatch.setattr(tus_userspacebuild, 'is_nogpgcheck_set', lambda: False)
+    monkeypatch.setattr(tus_userspacebuild.rhsm, 'skip_rhsm', lambda: True)
+    monkeypatch.setattr(tus_userspacebuild.config, 'is_verbose', lambda: True)
 
-    cmd = tus_userspacegen._assemble_dnf_install_command(
+    cmd = tus_userspacebuild._assemble_dnf_install_command(
         '9', '/el9target', ['BaseOS', 'AppStream'], ['pkgA', 'pkgB'])
 
     assert cmd == _expected_dnf_cmd(
@@ -1619,11 +1623,11 @@ def test_prepare_target_userspace_disk_space_hint(monkeypatch):
     ctx = _CmdRecorderContext(raise_exc=_cpe_with_stderr(stderr))
 
     with pytest.raises(StopActorExecutionError) as err:
-        tus_userspacegen.prepare_target_userspace(ctx, '/u', ['BaseOS'], ['pkg'])
+        tus_userspacebuild.prepare_target_userspace(ctx, '/u', ['BaseOS'], ['pkg'])
 
     assert err.value.message == 'There is not enough space on the file system hosting /var/lib/leapp.'
     assert '250MB' in err.value.details['hint']
-    assert tus_userspacegen.DEDICATED_LEAPP_PART_URL in err.value.details['hint']
+    assert tus_userspacebuild.DEDICATED_LEAPP_PART_URL in err.value.details['hint']
 
 
 def test_prepare_target_userspace_dnf_conf_proxy_hint(monkeypatch):
@@ -1632,7 +1636,7 @@ def test_prepare_target_userspace_dnf_conf_proxy_hint(monkeypatch):
     ctx = _CmdRecorderContext(raise_exc=_cpe_with_stderr('some unrelated dnf error'))
 
     with pytest.raises(StopActorExecutionError) as err:
-        tus_userspacegen.prepare_target_userspace(ctx, '/u', ['BaseOS'], ['pkg'])
+        tus_userspacebuild.prepare_target_userspace(ctx, '/u', ['BaseOS'], ['pkg'])
 
     assert '/etc/dnf/dnf.conf' in err.value.details['hint']
     assert '/etc/leapp/files/dnf.conf' in err.value.details['hint']
@@ -1646,7 +1650,7 @@ def test_prepare_target_userspace_repo_proxy_hint(monkeypatch):
     ctx = _CmdRecorderContext(raise_exc=_cpe_with_stderr('some unrelated dnf error'))
 
     with pytest.raises(StopActorExecutionError) as err:
-        tus_userspacegen.prepare_target_userspace(ctx, '/u', ['BaseOS'], ['pkg'])
+        tus_userspacebuild.prepare_target_userspace(ctx, '/u', ['BaseOS'], ['pkg'])
 
     assert 'repository configuration file' in err.value.details['hint']
 
@@ -1656,7 +1660,7 @@ def test_prepare_target_userspace_centos_to_rhel_hint(monkeypatch):
     ctx = _CmdRecorderContext(raise_exc=_cpe_with_stderr('some unrelated dnf error'))
 
     with pytest.raises(StopActorExecutionError) as err:
-        tus_userspacegen.prepare_target_userspace(ctx, '/u', ['BaseOS'], ['pkg'])
+        tus_userspacebuild.prepare_target_userspace(ctx, '/u', ['BaseOS'], ['pkg'])
 
     assert '--target-version' in err.value.details['hint']
 
@@ -1695,13 +1699,13 @@ def test__prep_repository_access(monkeypatch, skip_rhsm):
     monkeypatch.setattr(tus_userspacegen.rhsm, 'skip_rhsm', lambda: skip_rhsm)
 
     copy_cert_calls = []
-    monkeypatch.setattr(tus_userspacegen.tus_repoaccess, '_copy_certificates',
+    monkeypatch.setattr(tus_repoaccess, '_copy_certificates',
                         lambda ctx, tu: copy_cert_calls.append((ctx, tu)))
     monkeypatch.setattr(tus_userspacegen.mounting, 'NspawnActions', _DummyCM)
-    monkeypatch.setattr(tus_userspacegen.tus_repoaccess, '_get_files_owned_by_rpms', lambda ctx, path: ['owned.repo'])
+    monkeypatch.setattr(tus_repoaccess, '_get_files_owned_by_rpms', lambda ctx, path: ['owned.repo'])
 
     runs = []
-    monkeypatch.setattr(tus_userspacegen.tus_repoaccess, 'run', lambda cmd, *a, **k: runs.append(list(cmd)))
+    monkeypatch.setattr(tus_repoaccess, 'run', lambda cmd, *a, **k: runs.append(list(cmd)))
 
     class Ctx:
         base_dir = '/scratch'
@@ -1713,7 +1717,7 @@ def test__prep_repository_access(monkeypatch, skip_rhsm):
             self.copytree_from_calls.append((src, dst))
 
     ctx = Ctx()
-    tus_userspacegen.tus_repoaccess.prep_repository_access(ctx, '/target')
+    tus_repoaccess.prep_repository_access(ctx, '/target')
 
     # certificates are always copied into the userspace
     assert copy_cert_calls == [(ctx, '/target')]
@@ -1754,15 +1758,15 @@ def test__copy_certificates_multihop_symlink(monkeypatch, tmp_path):
 
     monkeypatch.setattr(tus_userspacegen.api, 'current_logger', logger_mocked())
     monkeypatch.setattr(tus_userspacegen.mounting, 'NspawnActions', _DummyCM)
-    monkeypatch.setattr(tus_userspacegen.tus_repoaccess, '_get_files_owned_by_rpms',
+    monkeypatch.setattr(tus_repoaccess, '_get_files_owned_by_rpms',
                         lambda ctx, path, recursive=False: ['tls/multi.pem'])
-    monkeypatch.setattr(tus_userspacegen.tus_repoaccess, '_mkdir_with_copied_mode', lambda path, mode_from: None)
-    monkeypatch.setattr(tus_userspacegen.tus_repoaccess, '_copy_decouple', lambda src, dst: None)
+    monkeypatch.setattr(tus_repoaccess, '_mkdir_with_copied_mode', lambda path, mode_from: None)
+    monkeypatch.setattr(tus_repoaccess, '_copy_decouple', lambda src, dst: None)
 
     runs = []
-    monkeypatch.setattr(tus_userspacegen.tus_repoaccess, 'run', lambda cmd, *a, **k: runs.append(list(cmd)))
+    monkeypatch.setattr(tus_repoaccess, 'run', lambda cmd, *a, **k: runs.append(list(cmd)))
 
-    tus_userspacegen.tus_repoaccess._copy_certificates(None, target_userspace)
+    tus_repoaccess._copy_certificates(None, target_userspace)
 
     dst_path = os.path.join(target_userspace, 'etc', 'pki', 'tls', 'multi.pem')
     # CORRECT behavior: the multi-hop RPM-owned symlink is copied, not skipped ...
