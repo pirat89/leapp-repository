@@ -1597,6 +1597,22 @@ def test_prepare_target_userspace_dnf_command(monkeypatch, nogpgcheck, skip_rhsm
         nogpgcheck, skip_rhsm, verbose, enabled_repos=enabled_repos, packages=packages)
 
 
+def test_assemble_dnf_install_command_is_pure(monkeypatch):
+    # The assembler is a pure list builder: unlike prepare_target_userspace it
+    # needs no container, bind mount or gpg import - only the env/config lookups.
+    monkeypatch.setattr(tus_userspacegen.api, 'current_actor', CurrentActorMocked(dst_ver='9.6'))
+    monkeypatch.setattr(tus_userspacegen, 'is_nogpgcheck_set', lambda: False)
+    monkeypatch.setattr(tus_userspacegen.rhsm, 'skip_rhsm', lambda: True)
+    monkeypatch.setattr(tus_userspacegen.config, 'is_verbose', lambda: True)
+
+    cmd = tus_userspacegen._assemble_dnf_install_command(
+        '9', '/el9target', ['BaseOS', 'AppStream'], ['pkgA', 'pkgB'])
+
+    assert cmd == _expected_dnf_cmd(
+        nogpgcheck=False, skip_rhsm=True, verbose=True,
+        enabled_repos=['BaseOS', 'AppStream'], packages=['pkgA', 'pkgB'])
+
+
 def test_prepare_target_userspace_disk_space_hint(monkeypatch):
     _patch_prepare_env(monkeypatch)
     stderr = 'Disk Requirements:\n  At least 250MB more space needed on the / filesystem.\n'

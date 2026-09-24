@@ -146,6 +146,128 @@ def _handle_transaction_err_msg_size(err):
     raise StopActorExecutionError(message=message, details=details)
 
 
+def _assemble_dnf_install_command(target_major_version, install_root_dir, enabled_repos, packages):
+    """
+    Build the ``dnf install`` command line for the target userspace bootstrap.
+
+    Pure list builder with no container I/O, so the exact command shape can be
+    unit-tested in isolation.
+
+    :param target_major_version: major version of the target system
+    :param install_root_dir: value for dnf ``--installroot`` inside the container
+    :param enabled_repos: repoids to enable for the bootstrap transaction
+    :type enabled_repos: list
+    :param packages: packages to install into the target userspace
+    :type packages: list
+    :return: the assembled ``dnf install`` argv
+    :rtype: list
+    """
+    repos_opt = [['--enablerepo', repo] for repo in enabled_repos]
+    repos_opt = list(itertools.chain(*repos_opt))
+    cmd = ['dnf', 'install', '-y']
+    if is_nogpgcheck_set():
+        cmd.append('--nogpgcheck')
+    cmd += [
+        '--setopt=module_platform_id=platform:el{}'.format(target_major_version),
+        '--setopt=keepcache=1',
+        '--releasever', api.current_actor().configuration.version.target,
+        '--installroot', install_root_dir,
+        '--disablerepo', '*'
+        ] + repos_opt + packages
+    if config.is_verbose():
+        cmd.append('-v')
+    if rhsm.skip_rhsm():
+        cmd += ['--disableplugin', 'subscription-manager']
+    return cmd
+
+
+def _diagnose_dnf_install_failure(exc):
+    """
+    Translate a failed ``dnf install`` into a StopActorExecutionError.
+
+    Inspects the failure and the environment and attaches the most useful
+    remediation hint available: not-enough-disk-space raises immediately with a
+    dedicated message; a proxy configured in dnf.conf or for an enabled
+    repository sets a proxy hint; a CentOS-to-RHEL upgrade appends a
+    target-version reminder to any existing hint. This function never returns -
+    it always raises.
+
+    :param exc: the failure raised by the ``dnf install`` transaction
+    :type exc: CalledProcessError
+    :raises StopActorExecutionError: always
+    """
+    target_major_version = get_target_major_version()
+    message = 'Unable to install target \'{}\' {} userspace packages.'.format(
+        get_target_distro_id(), target_major_version
+    )
+    details = {'details': str(exc), 'stderr': exc.stderr}
+
+    if 'more space needed on the' in exc.stderr:
+        # The stderr contains this error summary:
+        # Disk Requirements:
+        #   At least <size> more space needed on the <path> filesystem.
+        _handle_transaction_err_msg_size(exc)
+
+    # If a proxy was set in dnf config, it should be the reason why dnf
+    # failed since leapp does not support updates behind proxy yet.
+    for manager_info in api.consume(PkgManagerInfo):
+        if manager_info.configured_proxies:
+            details['hint'] = (
+                'DNF failed to install userspace packages, likely due to the proxy '
+                'configuration detected in the YUM/DNF configuration file. '
+                'Make sure the proxy is properly configured in /etc/dnf/dnf.conf. '
+                'It\'s also possible the proxy settings in the DNF configuration file are '
+                'incompatible with the target system. A compatible configuration can be '
+                'placed in /etc/leapp/files/dnf.conf which, if present, will be used during '
+                'the upgrade instead of /etc/dnf/dnf.conf. '
+                'In such case the configuration will also be applied to the target system.'
+            )
+
+    # Similarly if a proxy was set specifically for one of the repositories.
+    for repo_facts in api.consume(RepositoriesFacts):
+        for repo_file in repo_facts.repositories:
+            if any(repo_data.proxy and repo_data.enabled for repo_data in repo_file.data):
+                details['hint'] = (
+                    'DNF failed to install userspace packages, likely due to the proxy '
+                    'configuration detected in a repository configuration file.'
+                )
+
+    if get_source_distro_id() == 'centos' and get_target_distro_id() == 'rhel':
+        check_rhel_release_hint = (
+            'When upgrading and converting from Centos Stream to Red Hat Enterprise Linux'
+            ' (RHEL), the automatically determined latest target version of RHEL \'{}\' might'
+            ' not yet have been released. If so, specify the latest released RHEL version'
+            ' manually using the --target-version commandline option.'
+        ).format(get_target_version())
+
+        if details.get('hint'):
+            # keep the proxy hint, we don't know which one is the problem
+            details['hint'] = f"{details['hint']}\n\n{check_rhel_release_hint}"
+        else:
+            details['hint'] = check_rhel_release_hint
+
+    raise StopActorExecutionError(message=message, details=details)
+
+
+def _run_dnf_install(context, cmd):
+    """
+    Run the assembled ``dnf install`` command inside the container.
+
+    On failure, delegate to :func:`_diagnose_dnf_install_failure`, which always
+    raises :class:`StopActorExecutionError` with the most specific remediation
+    hint that can be inferred from the failure and the environment.
+
+    :param context: the scratch container to run the transaction in
+    :type context: mounting.IsolatedActions class
+    :param cmd: the ``dnf install`` argv from :func:`_assemble_dnf_install_command`
+    :type cmd: list
+    """
+    try:
+        context.call(cmd, callback_raw=utils.logging_handler)
+    except CalledProcessError as exc:
+        _diagnose_dnf_install_failure(exc)
+
+
 def prepare_target_userspace(context, userspace_dir, enabled_repos, packages):
     """
     Implement the creation of the target userspace.
@@ -162,75 +284,8 @@ def prepare_target_userspace(context, userspace_dir, enabled_repos, packages):
         if not is_nogpgcheck_set():
             _import_gpg_keys(context, install_root_dir, target_major_version)
 
-        repos_opt = [['--enablerepo', repo] for repo in enabled_repos]
-        repos_opt = list(itertools.chain(*repos_opt))
-        cmd = ['dnf', 'install', '-y']
-        if is_nogpgcheck_set():
-            cmd.append('--nogpgcheck')
-        cmd += [
-            '--setopt=module_platform_id=platform:el{}'.format(target_major_version),
-            '--setopt=keepcache=1',
-            '--releasever', api.current_actor().configuration.version.target,
-            '--installroot', install_root_dir,
-            '--disablerepo', '*'
-            ] + repos_opt + packages
-        if config.is_verbose():
-            cmd.append('-v')
-        if rhsm.skip_rhsm():
-            cmd += ['--disableplugin', 'subscription-manager']
-        try:
-            context.call(cmd, callback_raw=utils.logging_handler)
-        except CalledProcessError as exc:
-            message = 'Unable to install target \'{}\' {} userspace packages.'.format(
-                get_target_distro_id(), target_major_version
-            )
-            details = {'details': str(exc), 'stderr': exc.stderr}
-
-            if 'more space needed on the' in exc.stderr:
-                # The stderr contains this error summary:
-                # Disk Requirements:
-                #   At least <size> more space needed on the <path> filesystem.
-                _handle_transaction_err_msg_size(exc)
-
-            # If a proxy was set in dnf config, it should be the reason why dnf
-            # failed since leapp does not support updates behind proxy yet.
-            for manager_info in api.consume(PkgManagerInfo):
-                if manager_info.configured_proxies:
-                    details['hint'] = (
-                        'DNF failed to install userspace packages, likely due to the proxy '
-                        'configuration detected in the YUM/DNF configuration file. '
-                        'Make sure the proxy is properly configured in /etc/dnf/dnf.conf. '
-                        'It\'s also possible the proxy settings in the DNF configuration file are '
-                        'incompatible with the target system. A compatible configuration can be '
-                        'placed in /etc/leapp/files/dnf.conf which, if present, will be used during '
-                        'the upgrade instead of /etc/dnf/dnf.conf. '
-                        'In such case the configuration will also be applied to the target system.'
-                    )
-
-            # Similarly if a proxy was set specifically for one of the repositories.
-            for repo_facts in api.consume(RepositoriesFacts):
-                for repo_file in repo_facts.repositories:
-                    if any(repo_data.proxy and repo_data.enabled for repo_data in repo_file.data):
-                        details['hint'] = (
-                            'DNF failed to install userspace packages, likely due to the proxy '
-                            'configuration detected in a repository configuration file.'
-                        )
-
-            if get_source_distro_id() == 'centos' and get_target_distro_id() == 'rhel':
-                check_rhel_release_hint = (
-                    'When upgrading and converting from Centos Stream to Red Hat Enterprise Linux'
-                    ' (RHEL), the automatically determined latest target version of RHEL \'{}\' might'
-                    ' not yet have been released. If so, specify the latest released RHEL version'
-                    ' manually using the --target-version commandline option.'
-                ).format(get_target_version())
-
-                if details.get('hint'):
-                    # keep the proxy hint, we don't know which one is the problem
-                    details['hint'] = f"{details['hint']}\n\n{check_rhel_release_hint}"
-                else:
-                    details['hint'] = check_rhel_release_hint
-
-            raise StopActorExecutionError(message=message, details=details)
+        cmd = _assemble_dnf_install_command(target_major_version, install_root_dir, enabled_repos, packages)
+        _run_dnf_install(context, cmd)
 
 
 def _gather_target_repositories(context, indata):
