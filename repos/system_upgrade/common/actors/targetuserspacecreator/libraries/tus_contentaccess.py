@@ -14,13 +14,14 @@ deliberate command/query separation: discovery must not mutate the container.
 
 import os
 
-from leapp.exceptions import StopActorExecutionError
+from leapp import reporting
+from leapp.exceptions import StopActorExecution, StopActorExecutionError
 from leapp.libraries.common import rhsm
-from leapp.libraries.common.config import get_target_distro_id
+from leapp.libraries.common.config import get_product_type, get_target_distro_id
 from leapp.libraries.common.config.version import get_target_major_version
 
 
-def prepare_repository_access(context, indata, prod_cert_path):
+def prepare_repository_access(context, indata):
     """
     Make the target repositories reachable from inside the container.
 
@@ -28,20 +29,66 @@ def prepare_repository_access(context, indata, prod_cert_path):
     CentOS Stream ``$stream`` variable when the target is CentOS Stream, and
     install the custom repofiles supplied on the command line.
 
+    The target product certificate is discovered automatically by
+    :func:`rhsm.switch_certificate`; when neither the minor- nor the
+    major-version certificate can be found we turn the resulting
+    :class:`rhsm.MissingTargetProductCertificate` into the missing-cert
+    upgrade inhibitor.
+
     :param context: the scratch container to set up
     :type context: mounting.IsolatedActions class
     :param indata: majority of input data for the actor
     :type indata: inputdata.InputData
-    :param prod_cert_path: path where the target product cert is stored
-    :type prod_cert_path: string
     """
     rhsm.set_container_mode(context)
-    rhsm.switch_certificate(context, indata.rhsm_info, prod_cert_path)
+    try:
+        rhsm.switch_certificate(context, indata.rhsm_info)
+    except rhsm.MissingTargetProductCertificate as exc:
+        _inhibit_missing_product_certificate(exc)
 
     if get_target_distro_id() == 'centos':
         adjust_dnf_stream_variable(context)
 
     _install_custom_repofiles(context, indata.custom_repofiles)
+
+
+def _inhibit_missing_product_certificate(exc):
+    """
+    Report the missing target product certificate as an upgrade inhibitor.
+
+    :func:`rhsm.switch_certificate` auto-discovers the target product
+    certificate and raises :class:`rhsm.MissingTargetProductCertificate` when
+    neither the minor- nor the major-version certificate exists. Surface that as
+    an inhibitor with a remediation hint rather than a bare actor error.
+
+    :param exc: the exception raised by :func:`rhsm.switch_certificate`
+    :type exc: rhsm.MissingTargetProductCertificate
+    """
+    cert_path = (exc.details or {}).get('cert_path')
+    cert = os.path.basename(cert_path) if cert_path else 'the required product certificate'
+
+    additional_summary = ''
+    if get_product_type('target') == 'beta':
+        additional_summary = (
+            ' This can happen when upgrading a beta system and the chosen target version does not have'
+            ' beta certificates attached (for example, because the GA has been released already).'
+        )
+
+    reporting.create_report([
+        reporting.Title('Cannot find the product certificate file for the chosen target system.'),
+        reporting.Summary(
+            'Expected certificate: {cert} with path {path} but it could not be found.{additional}'.format(
+                cert=cert, path=cert_path, additional=additional_summary)
+        ),
+        reporting.Groups([reporting.Groups.REPOSITORY]),
+        reporting.Groups([reporting.Groups.INHIBITOR]),
+        reporting.Severity(reporting.Severity.HIGH),
+        reporting.Remediation(hint=(
+            'Set the corresponding target os version in the LEAPP_DEVEL_TARGET_RELEASE environment variable for'
+            'which the {cert} certificate is provided'.format(cert=cert)
+        )),
+    ])
+    raise StopActorExecution()
 
 
 def adjust_dnf_stream_variable(context, varfile='/etc/dnf/vars/stream'):

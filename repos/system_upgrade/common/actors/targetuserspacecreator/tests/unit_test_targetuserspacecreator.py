@@ -12,7 +12,6 @@ from leapp import models, reporting
 from leapp.exceptions import StopActorExecution, StopActorExecutionError
 from leapp.libraries.actor import tus_userspacegen
 from leapp.libraries.common import distro, overlaygen, repofileutils, rhsm
-from leapp.libraries.common.config import architecture
 from leapp.libraries.common.testutils import create_report_mocked, CurrentActorMocked, logger_mocked, produce_mocked
 from leapp.libraries.stdlib import api, CalledProcessError
 from leapp.utils.deprecation import suppress_deprecation
@@ -21,19 +20,6 @@ if sys.version_info < (2, 8):
     from pathlib2 import Path
 else:
     from pathlib import Path
-
-
-CUR_DIR = os.path.dirname(os.path.abspath(__file__))
-_CERTS_PATH = os.path.join(CUR_DIR, '../../../files', tus_userspacegen.PROD_CERTS_FOLDER)
-_DEFAULT_CERT_PATH = os.path.join(_CERTS_PATH, '8.1', '479.pem')
-
-
-@pytest.fixture
-def adjust_cwd():
-    previous_cwd = os.getcwd()
-    os.chdir(os.path.join(CUR_DIR, "../"))
-    yield
-    os.chdir(previous_cwd)
 
 
 class MockedMountingBase:
@@ -864,30 +850,6 @@ def test_copy_decouple(monkeypatch, temp_directory_layout, initial_structure, ex
         raise
 
 
-@pytest.mark.parametrize('result,dst_ver,arch,prod_type', [
-    (os.path.join(_CERTS_PATH, '8.1', '479.pem'), '8.1', architecture.ARCH_X86_64, 'ga'),
-    (os.path.join(_CERTS_PATH, '8.1', '419.pem'), '8.1', architecture.ARCH_ARM64, 'ga'),
-    (os.path.join(_CERTS_PATH, '8.1', '279.pem'), '8.1', architecture.ARCH_PPC64LE, 'ga'),
-    (os.path.join(_CERTS_PATH, '8.2', '479.pem'), '8.2', architecture.ARCH_X86_64, 'ga'),
-    (os.path.join(_CERTS_PATH, '8.5', '486.pem'), '8.5', architecture.ARCH_X86_64, 'beta'),
-    (os.path.join(_CERTS_PATH, '8.2', '72.pem'), '8.2', architecture.ARCH_S390X, 'ga'),
-    (os.path.join(_CERTS_PATH, '8.5', '433.pem'), '8.5', architecture.ARCH_S390X, 'beta'),
-])
-def test_get_product_certificate_path(monkeypatch, adjust_cwd, result, dst_ver, arch, prod_type):
-    envars = {'LEAPP_DEVEL_TARGET_PRODUCT_TYPE': prod_type}
-    curr_actor_mocked = CurrentActorMocked(dst_ver=dst_ver, arch=arch, envars=envars)
-    monkeypatch.setattr(tus_userspacegen.api, 'current_actor', curr_actor_mocked)
-    assert tus_userspacegen._get_product_certificate_path() in result
-
-
-@pytest.mark.parametrize('src_distro', ('rhel', 'centos'))
-def test_get_product_certificate_path_nonrhel(monkeypatch, src_distro):
-    actor = CurrentActorMocked(src_distro=src_distro, dst_distro='notrhel')
-    monkeypatch.setattr(tus_userspacegen.api, 'current_actor', actor)
-    path = tus_userspacegen._get_product_certificate_path()
-    assert path is None
-
-
 @suppress_deprecation(models.RequiredTargetUserspacePackages)
 def _gen_packages_msgs():
     _cfiles = [
@@ -1318,13 +1280,10 @@ def mocked_consume_data():
 
 
 # TODO: come up with additional tests for the main function
-@pytest.mark.parametrize(
-    "distro,cert_path", [("rhel", _DEFAULT_CERT_PATH), ("centos", None)]
-)
-def test_perform_ok(monkeypatch, distro, cert_path):
+@pytest.mark.parametrize("distro", ["rhel", "centos"])
+def test_perform_ok(monkeypatch, distro):
     repoids = ['repoidX', 'repoidY']
     monkeypatch.setattr(tus_userspacegen.tus_inputdata, 'InputData', mocked_consume_data)
-    monkeypatch.setattr(tus_userspacegen, '_get_product_certificate_path', lambda: cert_path)
     monkeypatch.setattr(overlaygen, 'create_source_overlay', MockedMountingBase)
     monkeypatch.setattr(tus_userspacegen, '_gather_target_repositories', lambda *x: repoids)
     monkeypatch.setattr(tus_userspacegen, '_create_target_userspace', lambda *x: None)
@@ -1496,8 +1455,32 @@ def test_if_adjust_dnf_stream_variable_only_for_centos(
 
     adjust_called = False
 
-    tus_userspacegen._gather_target_repositories(MockedMountingBase, testInData, None)
+    tus_userspacegen._gather_target_repositories(MockedMountingBase, testInData)
     assert adjust_called == should_adjust
+
+
+def test_prepare_repository_access_missing_cert_inhibits(monkeypatch):
+    # A missing target product certificate (raised by rhsm.switch_certificate
+    # auto-discovery) is surfaced as the missing-cert inhibitor rather than a
+    # bare actor error.
+    def raise_missing(*args, **kwargs):
+        raise rhsm.MissingTargetProductCertificate(
+            message='Target RHEL product certificate is missing.',
+            details={'cert_path': '/some/prod-certs/9/479.pem'})
+
+    monkeypatch.setattr(tus_userspacegen.api, 'current_actor',
+                        CurrentActorMocked(envars={'LEAPP_DEVEL_TARGET_PRODUCT_TYPE': 'ga'}))
+    monkeypatch.setattr(reporting, 'create_report', create_report_mocked())
+    monkeypatch.setattr(rhsm, 'set_container_mode', lambda *a, **k: None)
+    monkeypatch.setattr(rhsm, 'switch_certificate', raise_missing)
+
+    with pytest.raises(StopActorExecution):
+        tus_userspacegen.tus_contentaccess.prepare_repository_access(MockedMountingBase, testInData)
+
+    assert reporting.create_report.called == 1
+    report = reporting.create_report.reports[0]
+    assert report['title'] == 'Cannot find the product certificate file for the chosen target system.'
+    assert reporting.Groups.INHIBITOR in report['groups']
 
 
 # ===========================================================================

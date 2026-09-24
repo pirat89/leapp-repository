@@ -3,8 +3,7 @@ import os
 import re
 import shutil
 
-from leapp import reporting
-from leapp.exceptions import StopActorExecution, StopActorExecutionError
+from leapp.exceptions import StopActorExecutionError
 from leapp.libraries.actor import (
     tus_contentaccess,
     tus_inputdata,
@@ -16,7 +15,6 @@ from leapp.libraries.actor import (
 from leapp.libraries.common import mounting, overlaygen, repofileutils, rhsm, utils
 from leapp.libraries.common.config import (
     get_env,
-    get_product_type,
     get_source_distro_id,
     get_target_distro_id
 )
@@ -62,7 +60,6 @@ from leapp.utils.deprecation import suppress_deprecation
 # and do not mess.
 # Issue: #486
 
-PROD_CERTS_FOLDER = 'prod-certs'
 PERSISTENT_PACKAGE_CACHE_DIR = '/var/lib/leapp/persistent_package_cache'
 DEDICATED_LEAPP_PART_URL = 'https://access.redhat.com/solutions/7011704'
 
@@ -236,82 +233,7 @@ def prepare_target_userspace(context, userspace_dir, enabled_repos, packages):
             raise StopActorExecutionError(message=message, details=details)
 
 
-def _get_product_certificate_path():
-    """
-    Retrieve the required / used product certificate for RHSM.
-
-    Product certificates are only used for RHEL. Returns None if the target
-    distro is not RHEL.
-
-    :return: The path to the product certificate or None on non-RHEL systems
-    :raises: StopActorExecution if a certificate cannot be found
-    """
-    if get_target_distro_id() != 'rhel':
-        return None
-
-    architecture = api.current_actor().configuration.architecture
-    target_version = api.current_actor().configuration.version.target
-    target_product_type = get_product_type('target')
-    certs_dir = api.get_common_folder_path(PROD_CERTS_FOLDER)
-
-    # We do not need any special certificates to reach repos from non-ga channels, only beta requires special cert.
-    if target_product_type != 'beta':
-        target_product_type = 'ga'
-
-    prod_certs = {
-        'x86_64': {
-            'ga': '479.pem',
-            'beta': '486.pem',
-        },
-        'aarch64': {
-            'ga': '419.pem',
-            'beta': '363.pem',
-        },
-        'ppc64le': {
-            'ga': '279.pem',
-            'beta': '362.pem',
-        },
-        's390x': {
-            'ga': '72.pem',
-            'beta': '433.pem',
-        }
-    }
-
-    try:
-        cert = prod_certs[architecture][target_product_type]
-    except KeyError as e:
-        raise StopActorExecutionError(message='Failed to determine what certificate to use for {}.'.format(e))
-
-    cert_path = os.path.join(certs_dir, target_version, cert)
-    if not os.path.isfile(cert_path):
-        additional_summary = ''
-        if target_product_type != 'ga':
-            additional_summary = (
-                ' This can happen when upgrading a beta system and the chosen target version does not have'
-                ' beta certificates attached (for example, because the GA has been released already).'
-
-            )
-
-        reporting.create_report([
-            reporting.Title('Cannot find the product certificate file for the chosen target system.'),
-            reporting.Summary(
-                'Expected certificate: {cert} with path {path} but it could not be found.{additional}'.format(
-                    cert=cert, path=cert_path, additional=additional_summary)
-            ),
-            reporting.Groups([reporting.Groups.REPOSITORY]),
-            reporting.Groups([reporting.Groups.INHIBITOR]),
-            reporting.Severity(reporting.Severity.HIGH),
-            reporting.Remediation(hint=(
-                'Set the corresponding target os version in the LEAPP_DEVEL_TARGET_RELEASE environment variable for'
-                'which the {cert} certificate is provided'.format(cert=cert)
-            )),
-        ])
-        raise StopActorExecution()
-
-    return cert_path
-
-
-def _gather_target_repositories(context, indata, prod_cert_path):
+def _gather_target_repositories(context, indata):
     """
     Establish content access in the container, then gather the target repoids.
 
@@ -323,10 +245,8 @@ def _gather_target_repositories(context, indata, prod_cert_path):
     :type context: mounting.IsolatedActions class
     :param indata: majority of input data for the actor
     :type indata: inputdata.InputData
-    :param prod_cert_path: path where the target product cert is stored
-    :type prod_cert_path: string
     """
-    tus_contentaccess.prepare_repository_access(context, indata, prod_cert_path)
+    tus_contentaccess.prepare_repository_access(context, indata)
     return tus_targetrepos.select_target_repositories(context, indata)
 
 
@@ -385,7 +305,6 @@ def perform():
     mounts_dir = os.path.join(scratch_dir, 'mounts')
 
     indata = tus_inputdata.InputData()
-    prod_cert_path = _get_product_certificate_path()
     reserve_space = overlaygen.get_recommended_leapp_free_space(tus_layout.target_userspace_path())
     with overlaygen.create_source_overlay(
             mounts_dir=mounts_dir,
@@ -401,7 +320,7 @@ def perform():
                 # TODO: this is out of tests completely
                 tus_rhui.setup_target_rhui_access_if_needed(context, indata)
 
-                target_repoids = _gather_target_repositories(context, indata, prod_cert_path)
+                target_repoids = _gather_target_repositories(context, indata)
                 _create_target_userspace(context, indata, indata.packages, indata.files, target_repoids)
                 # TODO: this is tmp solution as proper one needs significant refactoring
                 try:
