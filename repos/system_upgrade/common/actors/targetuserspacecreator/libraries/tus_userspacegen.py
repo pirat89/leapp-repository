@@ -20,30 +20,6 @@ from leapp.models import (
 )
 from leapp.utils.deprecation import suppress_deprecation
 
-# TODO: "refactor" (modify) the library significantly
-# The current shape is really bad and ineffective (duplicit parsing
-# of repofiles). The library is doing 3 (5) things:
-# # (0.) consume process input data
-# # 1. prepare the first container, to be able to obtain repositories for the
-# #    target system (this is extra neededwhen rhsm is used, but not reason to
-# #    do such thing only when rhsm is used. Be persistent here
-# # 2. gather target repositories that should AND can be used
-# #    - basically here is the main thing that is PITA; I started
-# #      the refactoring but realized that it needs much more changes because
-# #      of RHSM...
-# # 3. create the target userspace bootstrap
-# # (4.) produce messages with the data
-#
-# Because of the lack of time, I am extending the current bad situation,
-# but after the release, the related code should be really refactored.
-# It would be probably ideal, if this and other actors in the current and the
-# next phase are modified properly and we could create inhibitors in the check
-# phase and keep everything on the report. But currently it seems it doesn't
-# worth to invest so much energy into it. So let's just make this really
-# readable (includes split of the functionality into several libraries)
-# and do not mess.
-# Issue: #486
-
 
 def _gather_target_repositories(context, indata):
     """
@@ -62,7 +38,63 @@ def _gather_target_repositories(context, indata):
     return tus_targetrepos.select_target_repositories(context, indata)
 
 
+def _finalize_target_container(context, indata, userspace_path):
+    """
+    Finish content access on the freshly built target container.
+
+    Two post-build fix-ups the build step deliberately leaves to the
+    orchestrator:
+
+    - If the target repositories were reached only through repofiles injected by
+      a ``leapp-rhui-<provider>`` package, drop those repofiles. The target RHUI
+      client is already installed in the container and ships the same
+      definitions, so keeping the injected copies would duplicate the repos.
+    - Re-enter rhsm container mode, which the build steps switched off.
+    """
+    if indata.rhui_info:
+        api.current_logger().debug(
+            'Target container should have access to content. '
+            'Removing repofiles from leapp-rhui-<provider> from the target..'
+        )
+        setup_info = indata.rhui_info.target_client_setup_info
+        if not setup_info.bootstrap_target_client:
+            tus_rhui.remove_injected_repofiles(context, setup_info)
+
+    with mounting.NspawnActions(userspace_path) as target_context:
+        rhsm.set_container_mode(target_context)
+
+
 @suppress_deprecation(TMPTargetRepositoriesFacts)
+def _produce_facts(context, target_repoids, scratch_dir, mounts_dir):
+    """
+    Produce the actor's output messages.
+
+    Parse the build (scratch) container's ``.repo`` files once and ship them as
+    the point-in-time target-repositories snapshot (see CONTRACT.md for why the
+    actor produces one snapshot here rather than leaving same-phase consumers to
+    read the on-disk state themselves), then report which repositories were
+    actually used and where the target userspace was created.
+    """
+    try:
+        target_repo_facts = repofileutils.get_parsed_repofiles(context)
+    except repofileutils.InvalidRepoDefinition as e:
+        raise StopActorExecutionError(
+            message="Failed to parse target system repofiles: {}".format(str(e)),
+            details={
+                'hint': 'Ensure the repository definition is correct or remove it '
+                        'if the repository is not needed anymore. '
+                        'This issue is typically caused by missing definition of the name field. '
+                        'For more information, see: https://access.redhat.com/solutions/6969001.'
+            })
+    api.produce(TMPTargetRepositoriesFacts(repositories=target_repo_facts))
+    api.produce(UsedTargetRepositories(
+        repos=[UsedTargetRepository(repoid=repo) for repo in target_repoids]))
+    api.produce(TargetUserSpaceInfo(
+        path=tus_layout.target_userspace_path(),
+        scratch=scratch_dir,
+        mounts=mounts_dir))
+
+
 def perform():
     scratch_dir = os.getenv('LEAPP_CONTAINER_ROOT', '/var/lib/leapp/scratch')
     mounts_dir = os.path.join(scratch_dir, 'mounts')
@@ -79,49 +111,12 @@ def perform():
             # Mount the ISO into the scratch container
             target_iso = next(api.consume(TargetOSInstallationImage), None)
             with mounting.mount_upgrade_iso_to_root_dir(overlay.target, target_iso):
-
-                # TODO: this is out of tests completely
                 tus_rhui.setup_target_rhui_access_if_needed(context, indata)
-
                 target_repoids = _gather_target_repositories(context, indata)
 
                 userspace_path = tus_layout.target_userspace_path()
                 tus_userspacebuild.build_target_userspace(
                     context, indata.packages, indata.files, target_repoids, userspace_path)
 
-                # If we used only repofiles from leapp-rhui-<provider> then remove these as they
-                # provide duplicit definitions as the target clients already installed in the
-                # target container
-                if indata.rhui_info:
-                    api.current_logger().debug(
-                        'Target container should have access to content. '
-                        'Removing repofiles from leapp-rhui-<provider> from the target..'
-                    )
-                    setup_info = indata.rhui_info.target_client_setup_info
-                    if not setup_info.bootstrap_target_client:
-                        tus_rhui.remove_injected_repofiles(context, setup_info)
-
-                # and do not forget to set the rhsm into the container mode again
-                with mounting.NspawnActions(userspace_path) as target_context:
-                    rhsm.set_container_mode(target_context)
-
-                # TODO: this is tmp solution as proper one needs significant refactoring
-                try:
-                    target_repo_facts = repofileutils.get_parsed_repofiles(context)
-                except repofileutils.InvalidRepoDefinition as e:
-                    raise StopActorExecutionError(
-                        message="Failed to parse target system repofiles: {}".format(str(e)),
-                        details={
-                            'hint': 'Ensure the repository definition is correct or remove it '
-                                    'if the repository is not needed anymore. '
-                                    'This issue is typically caused by missing definition of the name field. '
-                                    'For more information, see: https://access.redhat.com/solutions/6969001.'
-                        })
-                api.produce(TMPTargetRepositoriesFacts(repositories=target_repo_facts))
-                # ## TODO ends here
-                api.produce(UsedTargetRepositories(
-                    repos=[UsedTargetRepository(repoid=repo) for repo in target_repoids]))
-                api.produce(TargetUserSpaceInfo(
-                    path=tus_layout.target_userspace_path(),
-                    scratch=scratch_dir,
-                    mounts=mounts_dir))
+                _finalize_target_container(context, indata, userspace_path)
+                _produce_facts(context, target_repoids, scratch_dir, mounts_dir)
