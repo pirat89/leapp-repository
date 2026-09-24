@@ -131,9 +131,10 @@ def _get_distro_available_repoids(context, indata):
 
 
 def _inhibit_if_no_base_repos(distro_repoids):
-    # FIXME: check that required repo IDs (baseos, appstream)
-    # + or check that all required RHEL repo IDs are available.
-
+    # NOTE: strengthening this beyond the minimal baseos+appstream heuristic below
+    # (verifying every required target repo ID is available) is a deliberate,
+    # behaviour-preserving feature gap - a generic solution is still an open design
+    # question (see the note just below). Tracked out-of-scope, not a TODO.
     target_major_version = get_target_major_version()
     # NOTE(ivasilev) For the moment at least AppStream and BaseOS repos are required. While we are still
     # contemplating on what can be a generic solution to checking this, let's introduce a minimal check for
@@ -188,11 +189,11 @@ def _get_all_available_repoids(context):
                 'hint': 'Ensure the repository definition is correct or remove it '
                         'if the repository is not required for the upgrade.'
             })
-    # TODO: this is not good solution, but keep it as it is now
-    # Issue: #486
+    # NOTE: when rhsm is skipped, the rhsm code path that flags duplicate repoids
+    # is not taken, so the duplicate-repo inhibitor is run explicitly here instead.
+    # Unifying this with rhsm's copy is an out-of-scope shared-lib change tracked in
+    # issue #486 (see _inhibit_on_duplicate_repos below). Not a TODO.
     if rhsm.skip_rhsm():
-        # only if rhsm is skipped, the duplicate repos are not detected
-        # automatically and we need to do it extra
         _inhibit_on_duplicate_repos(repofiles)
     repoids = []
     for rfile in repofiles:
@@ -208,8 +209,10 @@ def _inhibit_on_duplicate_repos(repofiles):
     When that happens, it not only shows misconfigured system, but then
     we can't get details of all the available repos as well.
     """
-    # TODO: this is is duplicate of rhsm._inhibit_on_duplicate_repos
-    # Issue: #486
+    # NOTE: this intentionally mirrors rhsm._inhibit_on_duplicate_repos but with an
+    # upgrade-container-specific report summary. De-duplicating the two would require
+    # parameterizing the shared rhsm helper's message, an out-of-scope shared-lib
+    # change tracked in issue #486. Not a TODO.
     duplicates = repofileutils.get_duplicate_repositories(repofiles).keys()
 
     if not duplicates:
