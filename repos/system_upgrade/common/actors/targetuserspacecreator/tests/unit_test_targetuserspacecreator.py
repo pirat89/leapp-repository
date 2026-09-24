@@ -1282,7 +1282,7 @@ def test_perform_ok(monkeypatch, distro):
         repos=[models.UsedTargetRepository(repoid=repo) for repo in repoids])
 
     assert tus_userspacegen.api.produce.called == 3
-    assert isinstance(tus_userspacegen.api.produce.model_instances[0], models.TMPTargetRepositoriesFacts)
+    assert isinstance(tus_userspacegen.api.produce.model_instances[0], models.TargetRepositoriesFacts)
     assert tus_userspacegen.api.produce.model_instances[1] == msg_target_repos
     # this one is full of constants, so it's safe to check just the instance
     assert isinstance(tus_userspacegen.api.produce.model_instances[2], models.TargetUserSpaceInfo)

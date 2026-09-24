@@ -1,6 +1,5 @@
 from leapp.actors import Actor
 from leapp.libraries.actor import tus_userspacegen
-from leapp.models import TMPTargetRepositoriesFacts  # deprecated
 from leapp.models import (
     CustomTargetRepositoryFile,
     PkgManagerInfo,
@@ -11,6 +10,7 @@ from leapp.models import (
     StorageInfo,
     TargetOSInstallationImage,
     TargetRepositories,
+    TargetRepositoriesFacts,
     TargetUserSpaceInfo,
     TargetUserSpacePreupgradeTasks,
     UsedTargetRepositories,
@@ -43,7 +43,7 @@ class TargetUserspaceCreator(Actor):
         XFSPresence,
         PkgManagerInfo,
     )
-    produces = (TargetUserSpaceInfo, UsedTargetRepositories, Report, TMPTargetRepositoriesFacts,)
+    produces = (TargetUserSpaceInfo, UsedTargetRepositories, Report, TargetRepositoriesFacts,)
     tags = (IPUWorkflowTag, TargetTransactionFactsPhaseTag)
 
     def process(self):

@@ -77,7 +77,7 @@ destination) before use.
   on-disk repo state reads it from `TargetUserSpaceInfo.path`, not from the snapshot below.**
 - `UsedTargetRepositories` — the repoids actually selected/usable. Consumed by 9+ actors
   (dnf actors, `enablerhsmtargetrepos`, `missinggpgkeysinhibitor`, `adjustlocalrepos`, …).
-- The **target-repositories snapshot** message (§14 records the model rename) — a point-in-time
+- The **`TargetRepositoriesFacts`** message (§14 records the model rename) — a point-in-time
   snapshot of the `.repo` files parsed from the build (scratch) container after the target userspace
   has been created. Consumed by **exactly two** actors, both in the later `TargetTransactionChecks`
   phase: `adjustlocalrepos` (reads each repofile's `file`, `repoid`, `baseurl`, `mirrorlist`) and
@@ -316,9 +316,11 @@ failure surfaces as a hard stop — never a silent continue.
 ## 14. Intentional interface changes in this redesign (gone by design, not lost)
 
 Recorded so verification does not mistake these for regressions:
-- **Snapshot model renamed** off its `TMP`/deprecated status to a genuine, documented target message
-  (§3); its two consumers (`adjustlocalrepos`, `missinggpgkeysinhibitor`) migrate atomically. Kept as
-  a produced message with the written rationale in §3 — **not** switched to on-demand reads.
+- **Snapshot model renamed** `TMPTargetRepositoriesFacts` → `TargetRepositoriesFacts`, off its
+  `TMP`/deprecated status (the `@deprecated` and every `@suppress_deprecation` are gone) to a genuine,
+  documented target message (§3); its two consumers (`adjustlocalrepos`, `missinggpgkeysinhibitor`)
+  migrated atomically. Kept as a produced message with the written rationale in §3 — **not** switched
+  to on-demand reads.
 - **`RequiredTargetUserspacePackages` consume dropped** — deprecated, no live producer; its
   replacement (`TargetUserSpacePreupgradeTasks`) is already consumed.
 - **`LiveModeConfig` consume dropped** — declared but never read.

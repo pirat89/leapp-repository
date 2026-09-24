@@ -11,14 +11,13 @@ from leapp.libraries.actor import (
 )
 from leapp.libraries.common import mounting, overlaygen, repofileutils, rhsm
 from leapp.libraries.stdlib import api
-from leapp.models import TMPTargetRepositoriesFacts  # deprecated all the time
 from leapp.models import (
     TargetOSInstallationImage,
+    TargetRepositoriesFacts,
     TargetUserSpaceInfo,
     UsedTargetRepositories,
     UsedTargetRepository
 )
-from leapp.utils.deprecation import suppress_deprecation
 
 
 def _gather_target_repositories(context, indata):
@@ -64,7 +63,6 @@ def _finalize_target_container(context, indata, userspace_path):
         rhsm.set_container_mode(target_context)
 
 
-@suppress_deprecation(TMPTargetRepositoriesFacts)
 def _produce_facts(context, target_repoids, scratch_dir, mounts_dir):
     """
     Produce the actor's output messages.
@@ -86,7 +84,7 @@ def _produce_facts(context, target_repoids, scratch_dir, mounts_dir):
                         'This issue is typically caused by missing definition of the name field. '
                         'For more information, see: https://access.redhat.com/solutions/6969001.'
             })
-    api.produce(TMPTargetRepositoriesFacts(repositories=target_repo_facts))
+    api.produce(TargetRepositoriesFacts(repositories=target_repo_facts))
     api.produce(UsedTargetRepositories(
         repos=[UsedTargetRepository(repoid=repo) for repo in target_repoids]))
     api.produce(TargetUserSpaceInfo(

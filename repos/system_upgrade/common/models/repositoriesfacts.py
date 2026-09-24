@@ -1,6 +1,5 @@
 from leapp.models import fields, Model
 from leapp.topics import SystemFactsTopic
-from leapp.utils.deprecation import deprecated
 
 
 class RepositoryData(Model):
@@ -29,17 +28,20 @@ class RepositoriesFacts(Model):
     repositories = fields.List(fields.Model(RepositoryFile))
 
 
-@deprecated(
-    since="2020-09-01",
-    message=(
-        "The model is temporary and not assumed to be used in any "
-        "other actors."
-    ),
-)
-class TMPTargetRepositoriesFacts(RepositoriesFacts):
-    """Do not consume this model anywhere outside of localreposinhibit.
+class TargetRepositoriesFacts(RepositoriesFacts):
+    """Snapshot of the ``.repo`` files present in the built target userspace.
 
-    The model is temporary and will be removed in close future
+    Produced once by the ``target_userspace_creator`` actor in the
+    TargetTransactionFacts phase, right after the target userspace is built and
+    before any later phase rewrites its repofiles. Both consumers run later, in
+    the TargetTransactionChecks phase -- ``adjust_local_repos`` (which rewrites
+    local ``file://`` URLs in the repofiles in place) and
+    ``missing_gpg_keys_inhibitor`` -- so shipping a single pre-mutation snapshot
+    gives them a stable view that does not depend on actor ordering or on
+    re-reading the on-disk repofiles.
+
+    Deliberately a distinct type from the source-system ``RepositoriesFacts``
+    (same field shape, different subject and lifecycle) to keep target and source
+    repository facts from being conflated. Internal to the in-place upgrade
+    workflow; not a stable interface for out-of-tree consumers.
     """
-
-    pass
