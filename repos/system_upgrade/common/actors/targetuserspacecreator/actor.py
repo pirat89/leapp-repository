@@ -1,13 +1,11 @@
 from leapp.actors import Actor
 from leapp.libraries.actor import tus_userspacegen
-from leapp.models import RequiredTargetUserspacePackages  # deprecated
-from leapp.models import TMPTargetRepositoriesFacts  # deprecated
 from leapp.models import (
     CustomTargetRepositoryFile,
-    LiveModeConfig,
     PkgManagerInfo,
     Report,
     RepositoriesFacts,
+    RepositoriesFactsTarget,
     RHSMInfo,
     RHUIInfo,
     StorageInfo,
@@ -21,7 +19,6 @@ from leapp.models import (
 from leapp.tags import IPUWorkflowTag, TargetTransactionFactsPhaseTag
 
 
-# @suppress_deprecation(RequiredTargetUserspacePackages, TMPTargetRepositoriesFacts)
 class TargetUserspaceCreator(Actor):
     """
     Initializes a directory to be populated as a minimal environment to run binaries from the target system.
@@ -36,11 +33,9 @@ class TargetUserspaceCreator(Actor):
     name = 'target_userspace_creator'
     consumes = (
         CustomTargetRepositoryFile,
-        LiveModeConfig,
         RHSMInfo,
         RHUIInfo,
         RepositoriesFacts,
-        RequiredTargetUserspacePackages,
         StorageInfo,
         TargetOSInstallationImage,
         TargetRepositories,
@@ -48,7 +43,7 @@ class TargetUserspaceCreator(Actor):
         XFSPresence,
         PkgManagerInfo,
     )
-    produces = (TargetUserSpaceInfo, UsedTargetRepositories, Report, TMPTargetRepositoriesFacts,)
+    produces = (TargetUserSpaceInfo, UsedTargetRepositories, RepositoriesFactsTarget, Report)
     tags = (IPUWorkflowTag, TargetTransactionFactsPhaseTag)
 
     def process(self):
