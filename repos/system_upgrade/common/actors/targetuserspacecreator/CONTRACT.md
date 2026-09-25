@@ -98,8 +98,7 @@ destination) before use.
   rewrites only the `baseurl`/`mirrorlist` of local (`file://`) repos, re-reading the on-disk file for
   the actual edit; `missinggpgkeysinhibitor` reads only `repoid`/gpg-key fields, which no consumer
   rewrites.
-- **What the rename does NOT change:** same producer, same two consumers, same fields, same timing —
-  only the type name sheds its misleading `TMP`/deprecated status and gains this documented contract.
+- **What the rename does NOT change:** same producer, same two consumers, same fields, same timing
 
 ---
 
@@ -312,26 +311,3 @@ guaranteed restore; the swap order is remove → install → run with the four f
 failure surfaces as a hard stop — never a silent continue.
 
 ---
-
-## 14. Intentional interface changes in this redesign (gone by design, not lost)
-
-Recorded so verification does not mistake these for regressions:
-- **Snapshot model renamed** off its `TMP`/deprecated status to a genuine, documented target message
-  (§3); its two consumers (`adjustlocalrepos`, `missinggpgkeysinhibitor`) migrate atomically. Kept as
-  a produced message with the written rationale in §3 — **not** switched to on-demand reads.
-- **`RequiredTargetUserspacePackages` consume dropped** — deprecated, no live producer; its
-  replacement (`TargetUserSpacePreupgradeTasks`) is already consumed.
-- **`LiveModeConfig` consume dropped** — declared but never read.
-- **`LEAPP_DEVEL_SKIP_RHSM` dropped** — superseded by `LEAPP_NO_RHSM` / `--no-rhsm`.
-- **Actor-local product-cert path logic removed** — path determination delegated to
-  `rhsm.switch_certificate` auto-discovery; the missing-cert **inhibitor is preserved** (§8 item 1) by
-  catching `rhsm.MissingTargetProductCertificate`.
-- **`TargetRepositories.rhel_repos` field dropped** (cross-actor; separate commit) — this actor
-  already reads only `distro_repos`/`custom_repos`, so its observable behaviour is unchanged; the
-  removal is gated on the deprecation window being confirmed closed.
-- **Already-retired upstream (context only):** the OS-release/`RepositoriesMapping` entry gate
-  (removed in groundwork `a7b9145`) — `perform()` runs unconditionally when the phase runs.
-
-Out of scope (explicitly not done here): moving the inhibitors to the check phase; consolidating the
-shared `rhsm` duplicate-repo inhibitor; the "report unavailable RHEL repos" feature gap; completing
-the `RepositoriesFacts` → `…Source` pairing rename.
