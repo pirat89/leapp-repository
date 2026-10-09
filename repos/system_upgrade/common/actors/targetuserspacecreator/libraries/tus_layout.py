@@ -41,7 +41,6 @@ class Layout:
         mounts_dir,
         installroot_overlay_mountpoint,
         persistent_pkg_cache_path,
-        scratch_reserve,
     ):
         self.container_root = container_root
         self.userspace_path = userspace_path
@@ -49,7 +48,6 @@ class Layout:
         self.mounts_dir = mounts_dir
         self.installroot_overlay_mountpoint = installroot_overlay_mountpoint
         self.persistent_pkg_cache_path = persistent_pkg_cache_path
-        self.scratch_reserve = scratch_reserve
 
 
 def compute():
@@ -65,8 +63,6 @@ def compute():
     installroot_overlay_mountpoint = os.path.join('/', installroot_dirname)
     persistent_pkg_cache_path = os.path.join(container_root, _PERSISTENT_PKG_CACHE_DIRNAME)
 
-    scratch_reserve = overlaygen.get_recommended_leapp_free_space(userspace_path)
-
     return Layout(
         container_root=container_root,
         userspace_path=userspace_path,
@@ -74,7 +70,6 @@ def compute():
         mounts_dir=mounts_dir,
         installroot_overlay_mountpoint=installroot_overlay_mountpoint,
         persistent_pkg_cache_path=persistent_pkg_cache_path,
-        scratch_reserve=scratch_reserve,
     )
 
 
@@ -91,12 +86,13 @@ def scratch_container(layout, inputs):
     :param inputs: The :class:`~.tus_inputdata.InputData` value object.
     :yields: An entered ``mounting.NspawnActions`` scratch context.
     """
+    scratch_reserve = overlaygen.get_recommended_leapp_free_space(layout.userspace_path)
     with overlaygen.create_source_overlay(
         mounts_dir=layout.mounts_dir,
         scratch_dir=layout.scratch_dir,
         xfs_info=None,  # the parameter is unused in the function
         storage_info=inputs.storage_info,
-        scratch_reserve=layout.scratch_reserve,
+        scratch_reserve=scratch_reserve,
     ) as overlay:
         # NullMount (a no-op) is returned when no ISO is present, so this is safe
         # to enter unconditionally.
