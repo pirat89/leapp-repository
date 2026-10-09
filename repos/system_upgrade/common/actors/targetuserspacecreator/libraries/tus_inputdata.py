@@ -39,16 +39,14 @@ class InputData:
     """Plain value object holding the validated actor inputs."""
 
     def __init__(self, storage_info, target_repositories, custom_repofiles,
-                 rhsm_info, rhui_info, target_iso, preupgrade_tasks,
-                 repositories_facts, pkg_manager_info, skip_rhsm, nogpgcheck,
-                 packages, copy_files):
+                 rhsm_info, rhui_info, target_iso, repositories_facts,
+                 pkg_manager_info, skip_rhsm, nogpgcheck, packages, copy_files):
         self.storage_info = storage_info
         self.target_repositories = target_repositories
         self.custom_repofiles = custom_repofiles
         self.rhsm_info = rhsm_info
         self.rhui_info = rhui_info
         self.target_iso = target_iso
-        self.preupgrade_tasks = preupgrade_tasks
         self.repositories_facts = repositories_facts
         self.pkg_manager_info = pkg_manager_info
         self.skip_rhsm = skip_rhsm
@@ -143,7 +141,6 @@ def gather():
         rhsm_info=rhsm_info,
         rhui_info=rhui_info,
         target_iso=target_iso,
-        preupgrade_tasks=preupgrade_tasks,
         repositories_facts=repositories_facts,
         pkg_manager_info=pkg_manager_info,
         skip_rhsm=skip_rhsm,
