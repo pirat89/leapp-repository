@@ -176,7 +176,7 @@ def discover_client_exposed_repoids(context, rhui_info, target_version):
         return set()
 
     def with_hidden_suffix(path):
-        return '{}.path'.format(path)
+        return '{}.back'.format(path)
 
     setup_info = rhui_info.target_client_setup_info
 
@@ -207,6 +207,7 @@ def discover_client_exposed_repoids(context, rhui_info, target_version):
     )
 
     # Rename non-client repofiles so they will not be recognized when running dnf repolist
+    foreign = [context.full_path(path) for path in foreign]
     for repofile in foreign:
         os.rename(repofile, with_hidden_suffix(repofile))
 
