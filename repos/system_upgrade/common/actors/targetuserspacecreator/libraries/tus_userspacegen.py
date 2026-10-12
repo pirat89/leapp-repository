@@ -11,13 +11,7 @@ High-layer module: imports every other ``tus_*`` module.
 """
 
 from leapp import reporting
-from leapp.libraries.actor import (
-    tus_contentaccess,
-    tus_inputdata,
-    tus_layout,
-    tus_targetrepos,
-    tus_userspacebuild,
-)
+from leapp.libraries.actor import tus_contentaccess, tus_inputdata, tus_layout, tus_targetrepos, tus_userspacebuild
 from leapp.libraries.common import rhsm
 from leapp.libraries.common.config import get_product_type
 from leapp.libraries.stdlib import api

@@ -13,7 +13,7 @@ from leapp.models import (
     TargetRepositories,
     TargetUserSpaceInfo,
     TargetUserSpacePreupgradeTasks,
-    UsedTargetRepositories,
+    UsedTargetRepositories
 )
 from leapp.tags import IPUWorkflowTag, TargetTransactionFactsPhaseTag
 
