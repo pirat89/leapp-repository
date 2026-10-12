@@ -205,8 +205,7 @@ def _copy_files_to_userspace(context, files):
     :type files: List[CopyFile]
     """
     for file_task in files:
-        if not file_task.dst:
-            file_task.dst = file_task.src
+        # dst is guaranteed populated by tus_inputdata._normalize_copy_files.
         if os.path.isdir(file_task.src):
             context.remove_tree(file_task.dst)
             context.copytree_to(file_task.src, file_task.dst)

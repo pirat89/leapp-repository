@@ -268,17 +268,6 @@ def test_diagnose_dnf_failure_centos_to_rhel(monkeypatch):
     assert 'Centos Stream to Red Hat Enterprise Linux' in hints
 
 
-def test_copy_files_to_userspace_dst_defaults_to_src(monkeypatch):
-    context = MockContext()
-    monkeypatch.setattr(os.path, 'isdir', lambda path: False)
-    copy_file = CopyFile(src='/host/file')
-
-    tus_userspacebuild._copy_files_to_userspace(context, [copy_file])
-
-    assert copy_file.dst == '/host/file'
-    assert context.copy_to_calls == [('/host/file', '/host/file')]
-
-
 def test_copy_files_to_userspace_directory(monkeypatch):
     context = MockContext()
     monkeypatch.setattr(os.path, 'isdir', lambda path: True)

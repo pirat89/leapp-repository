@@ -55,12 +55,33 @@ class InputData:  # pylint: disable=too-many-arguments
         self.copy_files = copy_files
 
 
+def _normalize_copy_files(copy_files):
+    """
+    Fill the destination of every CopyFile whose ``dst`` is empty with its ``src``.
+
+    A null/empty ``dst`` means "copy to the same path as ``src``". Applying this
+    convention once, here at the actor's input boundary, lets every downstream
+    consumer rely on ``dst`` always being populated instead of re-implementing the
+    ``dst or src`` fallback on each access. Mutates the given CopyFile objects in
+    place and returns the same list for convenient chaining.
+    """
+    for copy_file in copy_files:
+        if not copy_file.dst:
+            copy_file.dst = copy_file.src
+    return copy_files
+
+
 def _dedup_copy_files(copy_files):
-    """De-duplicate CopyFile entries by their (src, dst) pair, preserving order."""
+    """
+    De-duplicate CopyFile entries by their (src, dst) pair, preserving order.
+
+    Expects ``dst`` to be already normalized (see :func:`_normalize_copy_files`),
+    so entries that differ only by an implicit vs. explicit destination collapse
+    into one.
+    """
     seen = set()
     result = []
     for copy_file in copy_files:
-        # TODO this does not consider that if dst == None then dst = src
         key = (copy_file.src, copy_file.dst)
         if key in seen:
             continue
@@ -129,7 +150,14 @@ def gather():
         packages |= set(task.install_rpms)
         raw_copy_files.extend(task.copy_files)
 
-    copy_files = _dedup_copy_files(raw_copy_files)
+    copy_files = _dedup_copy_files(_normalize_copy_files(raw_copy_files))
+
+    # Normalize the RHUI client-setup copy files too, so tus_rhui can rely on a
+    # populated dst without re-applying the dst-or-src convention per access.
+    if rhui_info:
+        setup = rhui_info.target_client_setup_info
+        _normalize_copy_files(setup.preinstall_tasks.files_to_copy_into_overlay)
+        _normalize_copy_files(setup.postinstall_tasks.files_to_copy)
 
     # TODO do we want this in the data? makes mocking a little easier maybe
     nogpgcheck = is_nogpgcheck_set()

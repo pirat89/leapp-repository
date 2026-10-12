@@ -25,24 +25,19 @@ from leapp.libraries.stdlib import api, CalledProcessError
 _YUM_REPOS_D = '/etc/yum.repos.d'
 
 
-def _copy_file_dst(copy_file):
-    """Return the intended destination for a CopyFile (dst may be null → src)."""
-    # TODO(pstodulk): perform the action in data input loading??
-    return copy_file.dst if copy_file.dst else copy_file.src
-
-
 def _resolve_copy_target(context, copy_file):
     """
     R1 - copy-target path resolution.
 
-    If the destination resolves to an existing directory in the container, the
-    file lands at ``destination/basename(source)``; otherwise the destination
-    path is used unchanged.
+    ``copy_file.dst`` is guaranteed to be populated by the input-loading
+    normalization (see ``tus_inputdata._normalize_copy_files``). If the
+    destination resolves to an existing directory in the container, the file lands
+    at ``destination/basename(source)``; otherwise the destination path is used
+    unchanged.
     """
-    dst = _copy_file_dst(copy_file)
-    if os.path.isdir(context.full_path(dst)):
-        return os.path.join(dst, os.path.basename(copy_file.src))
-    return dst
+    if os.path.isdir(context.full_path(copy_file.dst)):
+        return os.path.join(copy_file.dst, os.path.basename(copy_file.src))
+    return copy_file.dst
 
 
 def _sanitized_copy_files_iter(context, copy_files):
@@ -51,7 +46,7 @@ def _sanitized_copy_files_iter(context, copy_files):
 
     Return tuple src, dst for each CopyFile object in the list. dst is resolved
     to reflect the expected dst path:
-      * fill it when dst is empty - path should be same as src then
+      * dst is already populated at input load (empty dst becomes src there)
       * if dst points to a dir, return path dst/fname
 
     The resulting list is sorted by the destination path. Note that at this

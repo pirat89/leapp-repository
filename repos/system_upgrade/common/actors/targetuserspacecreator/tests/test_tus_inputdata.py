@@ -1,4 +1,5 @@
 import pytest
+from test_tus_mock_utils import make_rhui_info
 
 from leapp.exceptions import StopActorExecutionError
 from leapp.libraries.actor import tus_inputdata
@@ -37,7 +38,9 @@ def _setup_actor(monkeypatch, msgs, skip_rhsm=False, nogpgcheck=False):
             [CopyFile(src='/a', dst='/b'), CopyFile(src='/a', dst='/b')],
             [('/a', '/b')],
         ),
-        # dst=None is a distinct key from an explicitly set dst.
+        # _dedup_copy_files matches on the raw pair and does NOT normalize, so a
+        # null dst is distinct from an explicit one. This is exactly why gather()
+        # must run _normalize_copy_files first (see test_gather_* below).
         (
             [CopyFile(src='/a'), CopyFile(src='/a', dst='/a')],
             [('/a', None), ('/a', '/a')],
@@ -57,6 +60,22 @@ def _setup_actor(monkeypatch, msgs, skip_rhsm=False, nogpgcheck=False):
 def test_dedup_copy_files(copy_files, expected_pairs):
     result = tus_inputdata._dedup_copy_files(copy_files)
     assert [(cf.src, cf.dst) for cf in result] == expected_pairs
+
+
+def test_normalize_copy_files():
+    copy_files = [
+        CopyFile(src='/a'),
+        CopyFile(src='/b', dst=''),
+        CopyFile(src='/c', dst='/target/c'),
+    ]
+    result = tus_inputdata._normalize_copy_files(copy_files)
+    # The objects are mutated in place and the same list is returned.
+    assert result is copy_files
+    assert [(cf.src, cf.dst) for cf in result] == [
+        ('/a', '/a'),
+        ('/b', '/b'),
+        ('/c', '/target/c'),
+    ]
 
 
 def test_gather_missing_rhsm_info(monkeypatch):
@@ -134,6 +153,38 @@ def test_gather_copy_files_merged_and_deduped(monkeypatch):
     assert result.packages == _EXPECTED_DEFAULT_PKGS | {'pkg1', 'pkg2'}
     assert [(cf.src, cf.dst) for cf in result.copy_files] == [
         ('/a', '/x'), ('/b', '/y'), ('/c', '/z')
+    ]
+
+
+def test_gather_normalizes_copy_files_before_dedup(monkeypatch):
+    # An implicit dst (None) and an explicit dst equal to src denote the same
+    # target; normalization runs before dedup, so they collapse into one entry.
+    task = TargetUserSpacePreupgradeTasks(
+        install_rpms=[],
+        copy_files=[CopyFile(src='/a'), CopyFile(src='/a', dst='/a')],
+    )
+    _setup_actor(monkeypatch, [StorageInfo(), task], skip_rhsm=True)
+
+    result = tus_inputdata.gather()
+
+    assert [(cf.src, cf.dst) for cf in result.copy_files] == [('/a', '/a')]
+
+
+def test_gather_normalizes_rhui_copy_files(monkeypatch):
+    rhui_info = make_rhui_info(
+        preinstall_copies=[CopyFile(src='/pre/a.repo'), CopyFile(src='/pre/b', dst='/etc/b')],
+        postinstall_copies=[CopyFile(src='/post/c')],
+    )
+    _setup_actor(monkeypatch, [StorageInfo(), rhui_info], skip_rhsm=True)
+
+    result = tus_inputdata.gather()
+
+    setup = result.rhui_info.target_client_setup_info
+    assert [(cf.src, cf.dst) for cf in setup.preinstall_tasks.files_to_copy_into_overlay] == [
+        ('/pre/a.repo', '/pre/a.repo'), ('/pre/b', '/etc/b')
+    ]
+    assert [(cf.src, cf.dst) for cf in setup.postinstall_tasks.files_to_copy] == [
+        ('/post/c', '/post/c')
     ]
 
 

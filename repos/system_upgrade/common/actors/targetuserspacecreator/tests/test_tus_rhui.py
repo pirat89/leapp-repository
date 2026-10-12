@@ -22,18 +22,6 @@ _SWAP_SCRIPT_PATH = '/leapp-rhui-swap.dnfsh'
 
 
 @pytest.mark.parametrize(
-    ('src', 'dst', 'expected'),
-    [
-        ('/src', '/dst', '/dst'),
-        ('/src', None, '/src'),
-        ('/src', '', '/src'),
-    ]
-)
-def test_copy_file_dst(src, dst, expected):
-    assert tus_rhui._copy_file_dst(CopyFile(src=src, dst=dst)) == expected
-
-
-@pytest.mark.parametrize(
     ('base_dir', 'isdir_path', 'src', 'dst', 'expected'),
     [
         # dst resolves to an existing dir -> file lands at dst/basename(src).
