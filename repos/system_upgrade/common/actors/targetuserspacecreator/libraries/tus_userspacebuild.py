@@ -1,14 +1,13 @@
 """
-Target userspace build: dnf install into the installroot, cert/repo access, file
-copies, the leapp dnf plugin, cloud repofile cleanup, and dnf-failure diagnosis
-(§9, §10).
+Target userspace build: run ``dnf install`` into the installroot, set up
+certificate and repository-file access, copy requested files in, install the
+leapp dnf plugin, clean up cloud repofiles, and translate dnf failures into
+actionable errors.
 
-High-layer module: imports the frozen ``tus_repoaccess``, ``tus_rhui``,
-``tus_layout`` and ``tus_constants``.
+High-layer module: imports ``tus_constants``, ``tus_repoaccess`` and ``tus_rhui``.
 
-The "build in the source overlay, then decouple into its own directory" mechanism
-(§1/§9) is isolated behind :func:`_prepared_installroot`. It is review /
-integration-verified rather than deeply unit-tested.
+The userspace is built inside a bind-mounted overlay and ends up in its own
+directory (``layout.userspace_path``); this mechanism lives in :func:`build`.
 """
 
 import os
@@ -36,12 +35,18 @@ def _persistent_cache_enabled():
 
 def _persistent_cache_pull(persistent_cache_path, installroot):
     """
-    Restore a previously stored dnf package cache into the installroot (§12, dev only).
+    Restore a previously stored dnf package cache into the installroot (development only).
 
     No-op unless ``LEAPP_DEVEL_USE_PERSISTENT_PACKAGE_CACHE=1``. Must be called
     after the installroot has been (re)created and before ``dnf install``. The
     persistent store lives on the real host; the installroot lives inside the
-    build overlay, so the copy goes host → container.
+    build overlay, so the copy goes from host to container. The persistent store
+    directory is always removed afterwards to keep the system uncluttered.
+
+    :param persistent_cache_path: Path to the persistent dnf cache store on the host.
+    :type persistent_cache_path: str
+    :param installroot: Path to the installroot whose dnf cache is restored.
+    :type installroot: str
     """
     if _persistent_cache_enabled():
         if not os.path.isdir(persistent_cache_path):
@@ -57,11 +62,17 @@ def _persistent_cache_pull(persistent_cache_path, installroot):
 
 def _persistent_cache_push(persistent_cache_path, installroot):
     """
-    Store the installroot dnf package cache in the persistent store (§12, dev only).
+    Store the installroot dnf package cache in the persistent store (development only).
 
-    No-op unless ``LEAPP_DEVEL_USE_PERSISTENT_PACKAGE_CACHE=1``. Must be called
-    after a successful build so the cache can be reused on the next run. The copy
-    goes container → host.
+    No-op unless ``LEAPP_DEVEL_USE_PERSISTENT_PACKAGE_CACHE=1``. Should be called
+    after a successful build so the cache can be reused on the next run. Any
+    existing persistent store is removed first, then the installroot cache is
+    moved out to it (from container to host).
+
+    :param persistent_cache_path: Path to the persistent dnf cache store on the host.
+    :type persistent_cache_path: str
+    :param installroot: Path to the installroot whose dnf cache is stored.
+    :type installroot: str
     """
     if not _persistent_cache_enabled():
         return
@@ -74,7 +85,19 @@ def _persistent_cache_push(persistent_cache_path, installroot):
 
 
 def _import_gpg_keys(context, installroot):
-    """Import the trusted target GPG keys into the installroot rpm database (§9)."""
+    """
+    Import the trusted target GPG keys into the installroot rpm database.
+
+    Iterates over every file in the target GPG certificates directory and imports
+    it via ``rpm --import``. If the certificates directory does not exist, logs a
+    warning and returns without importing anything.
+
+    :param context: The target userspace context used to run commands.
+    :type context: mounting.IsolatedActions
+    :param installroot: Path (relative to the context) of the installroot rpm database.
+    :type installroot: str
+    :raises CalledProcessError: If an ``rpm --import`` invocation fails.
+    """
     certs_dir = get_path_to_gpg_certs()
     if not os.path.isdir(certs_dir):
         api.current_logger().warning('No target GPG keys directory found at {}.'.format(certs_dir))
@@ -86,7 +109,28 @@ def _import_gpg_keys(context, installroot):
 
 
 def _build_dnf_install_cmd(installroot, releasever, repoids, skip_rhsm, nogpgcheck, packages):
-    """Assemble the ``dnf install`` command for the userspace build (§10)."""
+    """
+    Assemble the ``dnf install`` command used to build the target userspace.
+
+    Builds a ``dnf install -y`` command that disables all repositories and then
+    enables only the given repoids, optionally skipping GPG checks, and appends
+    the requested packages.
+
+    :param installroot: Path to the installroot to install into.
+    :type installroot: str
+    :param releasever: Target release version passed to dnf.
+    :type releasever: str
+    :param repoids: Repository IDs to enable for the install.
+    :type repoids: list[str]
+    :param skip_rhsm: Whether to skip RHSM-related dnf flags.
+    :type skip_rhsm: bool
+    :param nogpgcheck: Whether to add ``--nogpgcheck`` to the command.
+    :type nogpgcheck: bool
+    :param packages: Packages to install.
+    :type packages: list[str]
+    :returns: The assembled dnf command as a list of arguments.
+    :rtype: list
+    """
     cmd = ['dnf', 'install', '-y']
     if nogpgcheck:
         cmd.append('--nogpgcheck')
@@ -99,6 +143,19 @@ def _build_dnf_install_cmd(installroot, releasever, repoids, skip_rhsm, nogpgche
 
 
 def _raise_insufficient_space_error(err):
+    """
+    Raise a hard stop describing how much more disk space ``/var/lib/leapp`` needs.
+
+    Parses the required size out of the dnf "more space needed" stderr summary and
+    raises a :class:`StopActorExecutionError` whose hint tells the user how much
+    free space to add on the filesystem hosting ``/var/lib/leapp``. The original
+    "Disk Requirements" section is intentionally omitted to avoid confusing users
+    with a message about missing space on ``/``.
+
+    :param err: The dnf ``CalledProcessError`` whose stderr reports the missing space.
+    :type err: CalledProcessError
+    :raises StopActorExecutionError: Always, with the computed free-space hint.
+    """
     NO_SPACE_STR = 'more space needed on the'
 
     # Disk Requirements:
@@ -131,8 +188,19 @@ def _raise_insufficient_space_error(err):
 # that would bypass the functions
 def _diagnose_dnf_failure(error, inputs):
     """
-    Translate a dnf ``CalledProcessError`` into a friendly hard stop with the
-    applicable hints (§10, hints 1-4). Always raises.
+    Translate a dnf ``CalledProcessError`` into a user-friendly hard stop. Always raises.
+
+    Inspects the failure and attaches the most relevant hint before raising:
+    insufficient disk space, a proxy configured in the dnf configuration, a proxy
+    configured on an enabled repository, or (for CentOS Stream to RHEL upgrades) a
+    target RHEL version that may not have been released yet. When no specific cause
+    is recognised the error is still raised with the raw dnf output.
+
+    :param error: The dnf ``CalledProcessError`` to diagnose.
+    :type error: CalledProcessError
+    :param inputs: Input data providing ``pkg_manager_info`` and ``repositories_facts``.
+    :type inputs: tus_inputdata.InputData
+    :raises StopActorExecutionError: Always; the message and hints depend on the detected cause.
     """
     hint = None
 
@@ -197,12 +265,17 @@ def _diagnose_dnf_failure(error, inputs):
 
 def _copy_files_to_userspace(context, files):
     """
-    Copy the files/dirs from the host to the `context` userspace
+    Copy the requested files and directories from the host into the userspace.
 
-    :param context: the target userspace context
+    Each copy task's ``dst`` is expected to be already populated (by
+    ``tus_inputdata._normalize_copy_files``); this function does not fill it in.
+    Directories are removed at the destination first and then copied recursively,
+    while regular files are copied directly.
+
+    :param context: The target userspace context.
     :type context: mounting.IsolatedActions
-    :param files: list of files that should be copied from the host to the context
-    :type files: List[CopyFile]
+    :param files: Files/directories to copy from the host into the context.
+    :type files: list[CopyFile]
     """
     for file_task in files:
         # dst is guaranteed populated by tus_inputdata._normalize_copy_files.
@@ -214,6 +287,14 @@ def _copy_files_to_userspace(context, files):
 
 
 def _create_target_userspace_dir(dst_path):
+    """
+    Create the target userspace directory tree.
+
+    :param dst_path: Directory path to create.
+    :type dst_path: str
+    :raises StopActorExecutionError: If the directories cannot be created, with a
+        hint asking the user to ensure the path is empty and modifiable.
+    """
     api.current_logger().debug('Creating target userspace directories.')
     try:
         utils.makedirs(dst_path)
@@ -233,13 +314,33 @@ def _create_target_userspace_dir(dst_path):
 
 def build(context, layout, inputs, used_repos):
     """
-    Build the target userspace and return its :class:`TargetUserSpaceInfo` (§9).
+    Build the target userspace and return its :class:`TargetUserSpaceInfo`.
+
+    Pushes and restores the development package cache, recreates the userspace
+    directory, imports GPG keys, runs ``dnf install`` into a bind-mounted overlay,
+    then sets up repository access, copies requested files in, installs the leapp
+    dnf plugin, optionally cleans up cloud injected repofiles, and switches the
+    userspace into container mode.
 
     :param context: The entered nspawn scratch context.
+    :type context: mounting.IsolatedActions
     :param layout: The :class:`~.tus_layout.Layout`.
+    :type layout: tus_layout.Layout
     :param inputs: The :class:`~.tus_inputdata.InputData`.
+    :type inputs: tus_inputdata.InputData
     :param used_repos: The :class:`UsedTargetRepositories` selection.
-    :raises StopActorExecutionError: on dnf install failure (with §10 hints).
+    :type used_repos: UsedTargetRepositories
+    :returns: Information about the built target userspace.
+    :rtype: TargetUserSpaceInfo
+    :raises StopActorExecutionError: If the userspace directory cannot be created,
+        if importing the GPG keys fails, or if the ``dnf install`` fails (translated
+        into an actionable error with hints).
+
+    .. seealso::
+        :func:`tus_repoaccess.prep_repository_access` for repository-access setup exceptions.
+
+    .. seealso::
+        :func:`dnfplugin.install` for leapp dnf plugin installation exceptions.
     """
     repoids = [repo.repoid for repo in used_repos.repos]
     releasever = get_target_version()
@@ -281,17 +382,17 @@ def build(context, layout, inputs, used_repos):
         except CalledProcessError as e:
             _diagnose_dnf_failure(e, inputs)
 
-    # Prepare certificate / repository-file access inside the built userspace (§11).
+    # Prepare certificate / repository-file access inside the built userspace.
     tus_repoaccess.prep_repository_access(context, layout.userspace_path)
 
     with mounting.NspawnActions(base_dir=layout.userspace_path) as us_ctx:
-        # Copy the requested files into the userspace (§9).
+        # Copy the requested files into the userspace.
         _copy_files_to_userspace(us_ctx, inputs.copy_files)
 
-        # Install the leapp DNF plugin into the userspace (§9).
+        # Install the leapp DNF plugin into the userspace.
         dnfplugin.install(us_ctx.base_dir)
 
-        # Cloud: R6/R7 injected-repofile cleanup - only when not bootstrapping the
+        # Cloud: injected-repofile cleanup - only when not bootstrapping the
         # target client, after the plugin install and before container mode is set.
         if inputs.rhui_info and not inputs.rhui_info.target_client_setup_info.bootstrap_target_client:
             tus_rhui.cleanup_injected_repofiles(us_ctx, inputs.rhui_info)

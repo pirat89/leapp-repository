@@ -1,17 +1,12 @@
 """
-RHUI (cloud) client-swap logic for the ``targetuserspacecreator`` actor - the
-R1-R7 acceptance gate from §13.
+RHUI (cloud) client-swap logic for the ``targetuserspacecreator`` actor.
 
-The whole module is a no-op when no ``RHUIInfo`` is consumed (``rhui_info`` falsy):
-every public entry point guards on it. Otherwise it swaps the source RHUI client
-rpm(s) for the target client rpm(s) inside the scratch container (via
-``dnf shell``), applies the pre/post-install file tasks, and leaves
-``/etc/yum.repos.d`` consistent. Every RHUI failure surfaces as a hard stop -
-never a silent continue.
-
-Leaf module: imports shared leapp libraries, ``tus_constants`` and the frozen
-``tus_repoaccess`` (only its RPM-ownership helper). It must never be imported by
-``tus_repoaccess``.
+The whole module is a no-op when no ``RHUIInfo`` is consumed (``rhui_info``
+falsy): every public entry point guards on it and returns early. Otherwise it
+swaps the source RHUI client rpm(s) for the target client rpm(s) inside the
+scratch container (via ``dnf shell``), applies the pre/post-install file tasks,
+and leaves ``/etc/yum.repos.d`` consistent. Every RHUI failure surfaces as a
+hard stop (``StopActorExecutionError``) rather than a silent continue.
 """
 
 import os
@@ -27,13 +22,20 @@ _YUM_REPOS_D = '/etc/yum.repos.d'
 
 def _resolve_copy_target(context, copy_file):
     """
-    R1 - copy-target path resolution.
+    Resolve the final destination path for a single file copy.
 
-    ``copy_file.dst`` is guaranteed to be populated by the input-loading
+    ``copy_file.dst`` is relied upon to already be populated by the input-loading
     normalization (see ``tus_inputdata._normalize_copy_files``). If the
     destination resolves to an existing directory in the container, the file lands
     at ``destination/basename(source)``; otherwise the destination path is used
     unchanged.
+
+    :param context: Container context used to resolve paths against its base dir.
+    :type context: mounting.IsolatedActions
+    :param copy_file: A ``CopyFile`` object carrying ``src`` and ``dst``.
+    :type copy_file: CopyFile
+    :returns: The resolved destination path relative to the container base dir.
+    :rtype: str
     """
     if os.path.isdir(context.full_path(copy_file.dst)):
         return os.path.join(copy_file.dst, os.path.basename(copy_file.src))
@@ -42,18 +44,28 @@ def _resolve_copy_target(context, copy_file):
 
 def _sanitized_copy_files_iter(context, copy_files):
     """
-    Create sanitized iterator over list of CopyFiles.
+    Yield sanitized ``(src, dst)`` pairs for a list of ``CopyFile`` objects.
 
-    Return tuple src, dst for each CopyFile object in the list. dst is resolved
-    to reflect the expected dst path:
-      * dst is already populated at input load (empty dst becomes src there)
-      * if dst points to a dir, return path dst/fname
+    For each ``CopyFile`` the destination is resolved to reflect the expected
+    final path:
 
-    The resulting list is sorted by the destination path. Note that at this
+      * ``dst`` is already populated at input load (an empty ``dst`` becomes
+        ``src`` there)
+      * if ``dst`` points to a directory, the resolved path becomes
+        ``dst/basename(src)``
+
+    The pairs are yielded sorted by the destination path. Note that at this
     moment there is no copy of dirs in this module, so it should not be a problem,
     but we will want to apply this on other places possibly as well, and probably
     it's better to be a little bit more defensive as we do not know what will be
     in future.
+
+    :param context: Container context used to resolve destination paths.
+    :type context: mounting.IsolatedActions
+    :param copy_files: Iterable of ``CopyFile`` objects to sanitize.
+    :type copy_files: list[CopyFile]
+    :returns: Generator of ``(src, dst)`` tuples sorted by destination path.
+    :rtype: Iterator[tuple[str, str]]
     """
     src_dst_pairs = [(cf.src, _resolve_copy_target(context, cf)) for cf in copy_files]
     yield from sorted(src_dst_pairs, key=lambda p: p[1])
@@ -61,8 +73,16 @@ def _sanitized_copy_files_iter(context, copy_files):
 
 def _run_preinstall_tasks(context_scratch, preinstall_tasks):
     """
-    R3 - pre-install tasks into scratch: removals first, then host→container
-    copies (with parent dirs created).
+    Apply the RHUI pre-install file tasks into the scratch container.
+
+    Removals are processed first, then host-to-container copies (parent
+    directories are created as needed). Does nothing when ``preinstall_tasks``
+    is falsy.
+
+    :param context_scratch: Scratch container context the tasks are applied to.
+    :type context_scratch: mounting.IsolatedActions
+    :param preinstall_tasks: Tasks describing files to remove and to copy in.
+    :type preinstall_tasks: TargetRHUIPreInstallTasks
     """
     if not preinstall_tasks:
         api.current_logger().debug('No RHUI preinstall tasks - skipping.')
@@ -84,8 +104,16 @@ def _run_preinstall_tasks(context_scratch, preinstall_tasks):
 
 def _run_postinstall_tasks(context_scratch, postinstall_tasks):
     """
-    R4 - post-install tasks inside the container: in-container copies to each
-    destination (with parent dirs). Applied only after a successful swap.
+    Apply the RHUI post-install file tasks inside the scratch container.
+
+    Performs in-container copies to each destination (parent directories are
+    created as needed). Does nothing when ``postinstall_tasks`` is falsy. This is
+    invoked only after a successful client swap.
+
+    :param context_scratch: Scratch container context the tasks are applied to.
+    :type context_scratch: mounting.IsolatedActions
+    :param postinstall_tasks: Tasks describing in-container files to copy.
+    :type postinstall_tasks: TargetRHUIPostInstallTasks
     """
     if not postinstall_tasks:
         api.current_logger().debug('No RHUI postinstall tasks - skipping.')
@@ -107,9 +135,15 @@ def _run_postinstall_tasks(context_scratch, postinstall_tasks):
 
 def _get_repofiles_paths(context):
     """
-    Return set of paths of all ``*.repo`` files in /etc/yum.repos.d
+    Return the paths of all ``*.repo`` files in ``/etc/yum.repos.d``.
 
-    The paths are relative to ``context.base_dir``
+    Returns an empty set when the directory does not exist. The returned paths
+    are relative to ``context.base_dir``.
+
+    :param context: Container context whose ``/etc/yum.repos.d`` is inspected.
+    :type context: mounting.IsolatedActions
+    :returns: Set of ``*.repo`` file paths relative to the container base dir.
+    :rtype: set[str]
     """
     repos_dir = context.full_path(_YUM_REPOS_D)
     if not os.path.isdir(repos_dir):
@@ -121,9 +155,17 @@ def _get_repofiles_paths(context):
 
 def _repofiles_copied_at_setup(context, files_to_copy_into_overlay):
     """
-    Paths of the ``*.repo`` files injected by the pre-install copy tasks.
+    Return the ``*.repo`` destination paths injected by the pre-install copies.
 
-    The paths are relative to ``context.base_dir``
+    Only destinations ending with ``.repo`` are included. The returned paths are
+    relative to ``context.base_dir``.
+
+    :param context: Container context used to resolve destination paths.
+    :type context: mounting.IsolatedActions
+    :param files_to_copy_into_overlay: Pre-install copy tasks to inspect.
+    :type files_to_copy_into_overlay: list[CopyFile]
+    :returns: Set of injected ``*.repo`` destination paths.
+    :rtype: set[str]
     """
     setup_copied = set()
     for dummy_src, dst in _sanitized_copy_files_iter(context, files_to_copy_into_overlay):
@@ -134,10 +176,19 @@ def _repofiles_copied_at_setup(context, files_to_copy_into_overlay):
 
 def _dnf_repolist_repoids(context, target_version):
     """
-    Run ``dnf repolist`` and return the list of repoids, excluding source/debug
+    Run ``dnf repolist`` and return the set of repoids, excluding source/debug.
 
-    :return: List of repoids available in the context, excluding source/debug
-    :raises CalledProcessError: When the underlying ``dnf repolist`` call fails
+    All repositories are enabled while the ``*-source-*`` and ``*-debug-*`` repos
+    are disabled, and the repoids are parsed from the ``Repo-id`` lines of the
+    verbose output.
+
+    :param context: Container context the ``dnf repolist`` command runs in.
+    :type context: mounting.IsolatedActions
+    :param target_version: Release version passed to ``dnf`` via ``--releasever``.
+    :type target_version: str
+    :returns: Set of repoids available in the context, excluding source/debug.
+    :rtype: set[str]
+    :raises CalledProcessError: When the underlying ``dnf repolist`` call fails.
     """
     repoids = set()
     cmd = [
@@ -160,12 +211,25 @@ def _dnf_repolist_repoids(context, target_version):
 
 def discover_client_exposed_repoids(context, rhui_info, target_version):
     """
-    R2 - discover the repoids exposed by the RHUI clients, leaving
-    ``/etc/yum.repos.d`` byte-identical.
+    Discover the repoids exposed by the RHUI clients, leaving the repo dir intact.
 
-    Hides "foreign" repofiles (all ``*.repo`` minus client-owned minus
-    setup-copied), runs ``dnf repolist`` with only client+setup repos visible,
-    and restores every hidden file whether the repolist succeeds or fails.
+    Foreign repofiles (all ``*.repo`` minus the client-owned ones minus the
+    setup-copied ones) are temporarily renamed with a ``.back`` suffix so they are
+    not seen by ``dnf repolist``, which is then run with only the client and setup
+    repos visible. Every hidden file is renamed back in a ``finally`` block, so
+    ``/etc/yum.repos.d`` is left byte-identical whether the repolist succeeds or
+    fails. Returns an empty set when ``rhui_info`` is falsy.
+
+    :param context: Container context the discovery is performed in.
+    :type context: mounting.IsolatedActions
+    :param rhui_info: RHUI info describing the target client setup.
+    :type rhui_info: RHUIInfo
+    :param target_version: Release version used for the repolist query.
+    :type target_version: str
+    :returns: Set of repoids exposed by the target RHUI clients.
+    :rtype: set[str]
+    :raises StopActorExecutionError: When ``dnf repolist`` fails, or when querying
+        the client-owned repofiles fails.
     """
     if not rhui_info:
         return set()
@@ -221,7 +285,7 @@ def discover_client_exposed_repoids(context, rhui_info, target_version):
 
 def _parse_repoids_from_copied_files(copy_files):
     """
-    Parse repoids from the pre-install copied ``.repo`` files.
+    Parse repoids from the source ``.repo`` files of the pre-install copies.
 
     Note the function assumes:
 
@@ -233,6 +297,12 @@ def _parse_repoids_from_copied_files(copy_files):
 
     Under these conditions, it's safe to parse repofiles from their original
     paths.
+
+    :param copy_files: Pre-install copy tasks whose ``.repo`` sources are parsed.
+    :type copy_files: list[CopyFile]
+    :returns: Set of repoids defined by the copied repofiles.
+    :rtype: set[str]
+    :raises StopActorExecutionError: When a repofile cannot be parsed.
     """
     copied_repofiles = [cfile.src for cfile in copy_files if cfile.src.endswith('.repo')]
     copied_repoids = set()
@@ -255,8 +325,24 @@ def _parse_repoids_from_copied_files(copy_files):
 
 def _swap_clients(context_scratch, rhui_info, target_version, skip_rhsm, enable_only_repoids):
     """
-    Run the client swap via ``dnf shell`` (transaction: remove source clients →
-    install target clients → run). Swap failure → hard stop.
+    Swap the RHUI clients via a ``dnf shell`` transaction inside the container.
+
+    A ``dnf shell`` script is written that removes the source client rpm(s) (when
+    present), installs the target client rpm(s) and runs the transaction. When
+    ``enable_only_repoids`` is provided, all repos are disabled and only those
+    repoids are enabled for the swap. The script file is always removed afterwards.
+
+    :param context_scratch: Scratch container context the swap runs in.
+    :type context_scratch: mounting.IsolatedActions
+    :param rhui_info: RHUI info providing the source/target client package names.
+    :type rhui_info: RHUIInfo
+    :param target_version: Release version passed to the ``dnf`` command.
+    :type target_version: str
+    :param skip_rhsm: Whether to skip subscription-manager related dnf flags.
+    :type skip_rhsm: bool
+    :param enable_only_repoids: Repoids to exclusively enable during the swap.
+    :type enable_only_repoids: set[str]
+    :raises StopActorExecutionError: When the ``dnf shell`` transaction fails.
     """
     # FIXME: reduce amount of params
     script_lines = []
@@ -301,7 +387,17 @@ def _swap_clients(context_scratch, rhui_info, target_version, skip_rhsm, enable_
 
 
 def _query_rpm_for_pkg_files(context_scratch, pkgs):
-    """Return files installed by the target client rpm(s) (none → hard stop)."""
+    """
+    Return the set of files installed by the given rpm(s) via ``rpm -ql``.
+
+    :param context_scratch: Container context the ``rpm`` query runs in.
+    :type context_scratch: mounting.IsolatedActions
+    :param pkgs: Package names to query.
+    :type pkgs: list[str]
+    :returns: Set of file paths owned by the given packages.
+    :rtype: set[str]
+    :raises CalledProcessError: When the underlying ``rpm -ql`` call fails.
+    """
     cmd = ['rpm', '-ql'] + pkgs
     result = context_scratch.call(cmd, split=True)
     return set(result['stdout'])
@@ -309,9 +405,22 @@ def _query_rpm_for_pkg_files(context_scratch, pkgs):
 
 def _find_rhui_client_repofiles(context, pkgs, target_major_version):
     """
-    Return repofiles installed by the target client rpm(s)
+    Return the ``*.repo`` files in ``/etc/yum.repos.d`` owned by the client rpm(s).
 
-    The paths are relative to ``context.base_dir``
+    Queries the files owned by the given packages and keeps only those located in
+    ``/etc/yum.repos.d`` with a ``.repo`` suffix. The returned paths are relative
+    to ``context.base_dir``.
+
+    :param context: Container context the rpm query runs in.
+    :type context: mounting.IsolatedActions
+    :param pkgs: Target client package names to query.
+    :type pkgs: list[str]
+    :param target_major_version: Target RHEL major version, used in the error msg.
+    :type target_major_version: str
+    :returns: Set of client-owned repofile paths.
+    :rtype: set[str]
+    :raises StopActorExecutionError: When querying the files owned by the client
+        rpm(s) fails.
     """
     try:
         owned_files = _query_rpm_for_pkg_files(context, pkgs)
@@ -334,7 +443,23 @@ def _find_rhui_client_repofiles(context, pkgs, target_major_version):
 
 
 def _find_rhui_client_files(context_scratch, pkgs, target_major_version):
-    """Return files installed by the target client rpm(s) (none → hard stop)."""
+    """
+    Return all files installed by the target client rpm(s).
+
+    A failure to query the files is treated as the target clients not being
+    installed during the swap step and is turned into a hard stop.
+
+    :param context_scratch: Scratch container context the rpm query runs in.
+    :type context_scratch: mounting.IsolatedActions
+    :param pkgs: Target client package names to query.
+    :type pkgs: list[str]
+    :param target_major_version: Target RHEL major version, used in the error msg.
+    :type target_major_version: str
+    :returns: Set of file paths owned by the target client rpm(s).
+    :rtype: set[str]
+    :raises StopActorExecutionError: When the target client files cannot be
+        queried (i.e. the target clients were not installed).
+    """
     try:
         return _query_rpm_for_pkg_files(context_scratch, pkgs)
     except CalledProcessError as err:
@@ -354,8 +479,18 @@ def _find_rhui_client_files(context_scratch, pkgs, target_major_version):
 
 def _remove_nonclient_injected_files(context_scratch, rhui_info, client_files):
     """
-    Remove injected setup files whose container destination is not client-owned
-    and whose source is not in ``files_supporting_client_operation`` (§13 R5).
+    Remove injected setup files that are neither client-owned nor supporting.
+
+    Iterates the pre-install copies and removes each injected file whose container
+    destination is not among the client-owned files and whose source is not listed
+    in ``files_supporting_client_operation``.
+
+    :param context_scratch: Scratch container context the files are removed from.
+    :type context_scratch: mounting.IsolatedActions
+    :param rhui_info: RHUI info providing the setup copy tasks and supporting files.
+    :type rhui_info: RHUIInfo
+    :param client_files: Set of files owned by the installed target client rpm(s).
+    :type client_files: set[str]
     """
     setup = rhui_info.target_client_setup_info
     supporting = set(setup.files_supporting_client_operation)
@@ -368,22 +503,35 @@ def _remove_nonclient_injected_files(context_scratch, rhui_info, client_files):
 
 def perform_client_swap(context_scratch, rhui_info, target_version, skip_rhsm):
     """
-    R5 - orchestrate the whole RHUI client swap inside the scratch container.
+    Orchestrate the whole RHUI client swap inside the scratch container.
 
-    No-op when ``rhui_info`` is falsy. Order: pre-install tasks; early return if
-    ``bootstrap_target_client`` is false; restrict-to-copied-repoids (if the
-    toggle is set and pre-install copies exist); the client swap; post-install
-    tasks; locate installed client files; remove non-client injected setup files.
+    No-op when ``rhui_info`` is falsy. The steps are: apply pre-install tasks;
+    return early if ``bootstrap_target_client`` is false; optionally compute the
+    repoids to exclusively enable (when ``enable_only_repoids_in_copied_files`` is
+    set and pre-install copies exist); run the client swap; apply post-install
+    tasks; locate the installed client files; remove non-client injected setup
+    files.
+
+    :param context_scratch: Scratch container context the swap is performed in.
+    :type context_scratch: mounting.IsolatedActions
+    :param rhui_info: RHUI info describing the source/target clients and setup.
+    :type rhui_info: RHUIInfo
+    :param target_version: Release version used for the swap and client queries.
+    :type target_version: str
+    :param skip_rhsm: Whether to skip subscription-manager related dnf flags.
+    :type skip_rhsm: bool
+    :raises StopActorExecutionError: When parsing the copied repofiles fails, when
+        the client swap transaction fails, or when the installed client files
+        cannot be located.
     """
     if not rhui_info:
         return
 
     setup = rhui_info.target_client_setup_info
 
-    # R3
     _run_preinstall_tasks(context_scratch, setup.preinstall_tasks)
 
-    # R5: when not bootstrapping, stop right after pre-install (no swap etc.).
+    # When not bootstrapping, stop right after pre-install (no swap etc.).
     if not setup.bootstrap_target_client:
         return
 
@@ -408,13 +556,19 @@ def perform_client_swap(context_scratch, rhui_info, target_version, skip_rhsm):
 
 def cleanup_injected_repofiles(context, rhui_info):
     """
-    R6 - post-build injected-repofile cleanup.
+    Clean up injected repofiles not owned by any rpm after the build.
 
-    For each injected copy that is an existing ``.repo`` file: keep it if an RPM
-    owns it, delete it if none does (prevents duplicate repoids in the built
-    userspace). The caller (§13 R7) invokes this only for cloud, only when
+    No-op when ``rhui_info`` is falsy or when there are no pre-install tasks. For
+    each injected copy that is an existing ``.repo`` file: it is kept if an rpm
+    owns it and deleted if none does, which prevents duplicate repoids in the built
+    userspace. The caller invokes this only for cloud, only when
     ``bootstrap_target_client`` is false, after the leapp dnf plugin is installed
     and before subscription-manager container mode is set.
+
+    :param context: Container context the cleanup is performed in.
+    :type context: mounting.IsolatedActions
+    :param rhui_info: RHUI info providing the pre-install copy tasks.
+    :type rhui_info: RHUIInfo
     """
     if not rhui_info:
         return

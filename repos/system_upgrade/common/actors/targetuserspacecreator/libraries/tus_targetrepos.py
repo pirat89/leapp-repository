@@ -1,14 +1,15 @@
 """
-Target repository discovery, selection, and the build-container repo snapshot
-(§7 + inhibitors #2-#5).
+Target repository discovery, selection, and the build-container repo snapshot.
 
-Two entry points:
-  * :func:`select_target_repositories` - discover + select the usable target
-    repos, raising the repo inhibitors (§4 step 4);
-  * :func:`build_target_repositories_snapshot` - parse the build (scratch)
-    container's repofiles into the produced snapshot message (§4 step 6).
+This module provides two entry points:
+  * :func:`select_target_repositories` - discovers the repositories available in
+    the target userspace container, intersects them with the requested distro,
+    RHUI and custom repositories, and reports inhibitors when required
+    repositories are missing, duplicated, or none are usable;
+  * :func:`build_target_repositories_snapshot` - parses the build (scratch)
+    container's repofiles into the produced snapshot message.
 
-Mid-layer module: may import ``tus_rhui``; never the reverse.
+This module may import ``tus_rhui``; the reverse direction is not allowed.
 """
 
 from leapp import reporting
@@ -30,8 +31,16 @@ from leapp.utils.deprecation import suppress_deprecation
 @suppress_deprecation(RHELTargetRepository)
 def _requested_distro_repoids(target_repositories):
     """
-    Requested distro repoids: the union of ``distro_repos`` and the still
-    deprecated ``rhel_repos`` (§7; rhel_repos kept per user instruction).
+    Collect the requested distribution repoids.
+
+    Returns the union of the repoids from ``distro_repos`` and from the
+    deprecated ``rhel_repos`` field, which is still honored for backwards
+    compatibility.
+
+    :param target_repositories: Target repositories requested for the upgrade.
+    :type target_repositories: TargetRepositories
+    :returns: Set of requested distribution repoids.
+    :rtype: set[str]
     """
     distro_repos = target_repositories.distro_repos or []
     rhel_repos = target_repositories.rhel_repos or []
@@ -39,12 +48,31 @@ def _requested_distro_repoids(target_repositories):
 
 
 def _requested_custom_repoids(target_repositories):
+    """
+    Collect the requested custom repoids.
+
+    :param target_repositories: Target repositories requested for the upgrade.
+    :type target_repositories: TargetRepositories
+    :returns: Set of requested custom repoids.
+    :rtype: set[str]
+    """
     custom_repos = target_repositories.custom_repos or []
     return {repo.repoid for repo in custom_repos}
 
 
 def _all_available_repoids(context):
-    """All repoids defined in the container's repofiles."""
+    """
+    Collect every repoid defined in the container's repofiles.
+
+    :param context: Mounting context of the target userspace container.
+    :type context: mounting.IsolatedActions
+    :returns: Set of all repoids found across the container's repofiles.
+    :rtype: set[str]
+
+    .. seealso::
+        :func:`leapp.libraries.common.repofileutils.get_parsed_repofiles`
+        for the ``InvalidRepoDefinition`` raised when a repofile is malformed.
+    """
     repoids = set()
     for repofile in repofileutils.get_parsed_repofiles(context):
         for repo in repofile.data:
@@ -54,11 +82,21 @@ def _all_available_repoids(context):
 
 def _duplicate_repoids(context):
     """
-    Repoids defined more than once across the container's repofiles.
+    Find repoids defined more than once across the container's repofiles.
 
     Unlike :func:`_all_available_repoids` (which collapses repoids into a set),
-    this walks every repo entry so a repoid appearing in two (or more) repofiles -
-    or twice within one - is reported. Used for inhibitor #2 when RHSM is skipped.
+    this walks every repo entry, so a repoid appearing in two (or more)
+    repofiles - or twice within a single repofile - is reported. This detection
+    is used to report conflicting duplicate repositories when RHSM is skipped.
+
+    :param context: Mounting context of the target userspace container.
+    :type context: mounting.IsolatedActions
+    :returns: Set of repoids that are defined more than once.
+    :rtype: set[str]
+
+    .. seealso::
+        :func:`leapp.libraries.common.repofileutils.get_parsed_repofiles`
+        for the ``InvalidRepoDefinition`` raised when a repofile is malformed.
     """
     seen = set()
     duplicates = set()
@@ -72,7 +110,17 @@ def _duplicate_repoids(context):
 
 
 def _has_base_repos(repoids):
-    """Whether both a baseos and an appstream repo are present in ``repoids``."""
+    """
+    Check whether both a baseos and an appstream repository are present.
+
+    The match is case-insensitive and succeeds when a repoid contains the
+    substring ``baseos`` and another contains the substring ``appstream``.
+
+    :param repoids: Repoids to inspect.
+    :type repoids: collections.abc.Iterable[str]
+    :returns: ``True`` if both a baseos and an appstream repoid are present.
+    :rtype: bool
+    """
     lowered = [repoid.lower() for repoid in repoids]
     has_baseos = any('baseos' in repoid for repoid in lowered)
     has_appstream = any('appstream' in repoid for repoid in lowered)
@@ -81,9 +129,17 @@ def _has_base_repos(repoids):
 
 def _base_repo_check_applies(skip_rhsm):
     """
-    The baseos/appstream presence check runs by default and is skipped for:
-    (a) conversions; (b) source CentOS Stream 8; (c) RHEL target with RHSM
-    skipped (§7).
+    Decide whether the baseos/appstream presence check should run.
+
+    The check runs by default but is skipped in these cases:
+    (a) the upgrade is a conversion;
+    (b) the source system is CentOS Stream 8;
+    (c) the target system is RHEL and RHSM is being skipped.
+
+    :param skip_rhsm: Whether subscription-manager (RHSM) is being skipped.
+    :type skip_rhsm: bool
+    :returns: ``True`` if the baseos/appstream presence check applies.
+    :rtype: bool
     """
     if is_conversion():
         return False
@@ -97,6 +153,16 @@ def _base_repo_check_applies(skip_rhsm):
 
 
 def _inhibit_no_base_repos(target_major_ver):
+    """
+    Report an inhibitor when the required basic target OS repositories are missing.
+
+    Creates a high-severity inhibitor report stating that the baseos and
+    appstream repositories could not be found. For a RHEL target, a remediation
+    hint about subscription-manager and a valid SKU is included.
+
+    :param target_major_ver: Major version of the target system.
+    :type target_major_ver: str
+    """
     report = [
         reporting.Title('Cannot find required basic target OS repositories.'),
         reporting.Summary(
@@ -136,6 +202,15 @@ def _inhibit_no_base_repos(target_major_ver):
 
 
 def _inhibit_missing_custom_repos(missing_custom_repos):
+    """
+    Report an inhibitor when requested custom target repositories are missing.
+
+    Creates a high-severity inhibitor report listing the custom repoids that
+    could not be found in the target configuration.
+
+    :param missing_custom_repos: Requested custom repoids that were not found.
+    :type missing_custom_repos: collections.abc.Iterable[str]
+    """
     reporting.create_report([
         reporting.Title('Some required custom target repositories have not been found'),
         reporting.Summary(
@@ -163,6 +238,16 @@ def _inhibit_missing_custom_repos(missing_custom_repos):
 
 
 def _inhibit_no_enabled_target_repos(target_ver):
+    """
+    Report an inhibitor when no target repositories are enabled.
+
+    Creates a high-severity inhibitor report with remediation hints covering
+    subscription-manager registration and, for the ``--no-rhsm`` case, the use
+    of custom repository files.
+
+    :param target_ver: Full version of the target system.
+    :type target_ver: str
+    """
     target_major_ver = get_major_version(target_ver)
     reporting.create_report([
         reporting.Title('There are no enabled target repositories'),
@@ -202,6 +287,16 @@ def _inhibit_no_enabled_target_repos(target_ver):
 
 
 def _inhibit_duplicate_repos(duplicates):
+    """
+    Report an inhibitor when repositories are defined multiple times.
+
+    Creates a medium-severity inhibitor report listing the repoids defined more
+    than once inside the upgrade container, with a hint to remove or rename the
+    conflicting definitions.
+
+    :param duplicates: Repoids defined more than once.
+    :type duplicates: collections.abc.Iterable[str]
+    """
     reporting.create_report([
         reporting.Title('A YUM/DNF repository defined multiple times'),
         reporting.Summary(
@@ -221,6 +316,27 @@ def _inhibit_duplicate_repos(duplicates):
 
 
 def _discover_distro_and_rhui_target_repositories(context, rhui_info, target_version):
+    """
+    Discover the distribution and RHUI repoids available in the container.
+
+    Queries the repoids considered to be provided by the target distribution and,
+    when RHUI information is available, the repoids exposed by the RHUI client.
+    Both sets are logged and returned.
+
+    :param context: Mounting context of the target userspace container.
+    :type context: mounting.IsolatedActions
+    :param rhui_info: RHUI setup information, or a falsy value when not on RHUI.
+    :type rhui_info: RHUIInfo
+    :param target_version: Full version of the target system.
+    :type target_version: str
+    :returns: Tuple of (distribution repoids, RHUI repoids).
+    :rtype: tuple[set[str], set[str]]
+
+    .. seealso::
+        :func:`tus_rhui.discover_client_exposed_repoids`
+        for the ``StopActorExecutionError`` raised when RHUI repoids cannot be
+        retrieved.
+    """
     distro_repoids = set(distro.get_target_distro_repoids(context))
     api.current_logger().info(
         "The following repoids are considered as provided by the '{}' distribution:{}".format(
@@ -239,11 +355,28 @@ def _discover_distro_and_rhui_target_repositories(context, rhui_info, target_ver
 
 def select_target_repositories(context, inputs):
     """
-    Discover and select the usable target repositories (§7, §4 step 4).
+    Discover and select the usable target repositories.
 
-    :return: :class:`UsedTargetRepositories` with the selected repoids.
-    :raises StopActorExecution: on any of inhibitors #2-#5.
-    :raises StopActorExecutionError: on error (e.g. failed parsing repofiles)
+    Discovers the distribution, RHUI and all available repoids in the target
+    userspace container, intersects them with the requested distro, RHUI and
+    custom repositories, and returns the selected set. Several conditions report
+    an inhibitor and stop the upgrade: missing basic (baseos/appstream) target
+    repositories, duplicate repository definitions (only checked when RHSM is
+    skipped), no enabled target repository at all, or requested custom
+    repositories that are not available.
+
+    :param context: Mounting context of the target userspace container.
+    :type context: mounting.IsolatedActions
+    :param inputs: Collected inputs holding ``rhui_info``, ``skip_rhsm`` and
+        ``target_repositories``.
+    :type inputs: tus_inputdata.InputData
+    :returns: Selected target repositories.
+    :rtype: UsedTargetRepositories
+    :raises StopActorExecution: When an inhibitor is reported (missing basic
+        target repositories, duplicate repositories, no enabled target
+        repository, or missing requested custom repositories).
+    :raises StopActorExecutionError: When parsing the container repofiles fails,
+        or when the RHUI client repoids cannot be retrieved.
     """
     distro_repoids, rhui_repoids = _discover_distro_and_rhui_target_repositories(
         context, inputs.rhui_info, get_target_version()
@@ -281,7 +414,7 @@ def select_target_repositories(context, inputs):
 
     selected_custom = requested_custom & available
 
-    # Inhibitor #2 - duplicate repositories, ONLY when RHSM is being skipped.
+    # Detect duplicate repositories, ONLY when RHSM is being skipped.
     # TODO might be able to drop duplicates detection from the rhsm lib and
     # then it would be here in a single place
     if inputs.skip_rhsm:
@@ -296,12 +429,12 @@ def select_target_repositories(context, inputs):
             )
             _inhibit_duplicate_repos(duplicates)
 
-    # Inhibitor #4 - no enabled target repositories.
+    # No enabled target repositories at all.
     if not selected_distro | selected_custom:
         _inhibit_no_enabled_target_repos(get_target_version())
         raise StopActorExecution()
 
-    # Inhibitor #5 - missing custom target repositories.
+    # Requested custom target repositories that are missing.
     missing_custom = requested_custom - available
     if missing_custom:
         _inhibit_missing_custom_repos(missing_custom)
@@ -316,12 +449,17 @@ def select_target_repositories(context, inputs):
 
 def build_target_repositories_snapshot(context):
     """
-    Parse the build (scratch) container's repofiles into the snapshot message (§4 step 6).
+    Parse the build (scratch) container's repofiles into a snapshot message.
 
-    Preserves ``additional_fields`` (where gpg-key data lives, consumed by
-    ``missinggpgkeysinhibitor``).
+    The parsed repofiles preserve their ``additional_fields`` (where gpg-key
+    data lives), which is later consumed by the ``missinggpgkeysinhibitor``
+    actor.
 
-    :raises StopActorExecutionError: If repofile parsing fails
+    :param context: Mounting context of the build (scratch) container.
+    :type context: mounting.IsolatedActions
+    :returns: Snapshot of the container's repositories.
+    :rtype: RepositoriesFactsTarget
+    :raises StopActorExecutionError: When parsing the container repofiles fails.
     """
     try:
         repofiles = repofileutils.get_parsed_repofiles(context)

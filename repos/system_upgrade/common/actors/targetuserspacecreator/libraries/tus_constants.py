@@ -1,11 +1,8 @@
 """
-Shared, dependency-free constants and tiny pure helpers for the
-``targetuserspacecreator`` actor.
+Shared, dependency-free constants and small pure helpers for the ``targetuserspacecreator`` actor.
 
-This module sits at the very bottom of the actor's import DAG: it imports
-nothing actor-side, so any other ``tus_*`` module may import it without risking
-an import cycle. Keep it free of side effects and of imports from sibling
-``tus_*`` modules.
+This module intentionally imports nothing from the sibling ``tus_*`` modules, so any of them may import it without
+creating an import cycle. Keep it free of side effects and of such sibling imports.
 """
 
 from leapp.libraries.common.config.version import get_major_version
@@ -13,12 +10,17 @@ from leapp.libraries.common.config.version import get_major_version
 
 def common_dnf_flags(target_version, skip_rhsm):
     """
-    Build the dnf flags shared by the userspace install (§10) and the RHUI
-    client swap (§13 R5).
+    Build the common dnf command-line flags shared by the target userspace install and the RHUI client swap.
 
-    :param target_version: Target OS release version to pass to dnf.
-    :param skip_rhsm: Whether subscription-manager is being skipped.
-    :return: List of dnf command-line arguments.
+    The returned flags set the module platform id for the target major version, keep the dnf cache, and pin the
+    release version. When subscription-manager is being skipped, its dnf plugin is disabled as well.
+
+    :param target_version: Target OS release version passed to dnf as ``--releasever``.
+    :type target_version: str
+    :param skip_rhsm: Whether subscription-manager (and its dnf plugin) is being skipped.
+    :type skip_rhsm: bool
+    :returns: The dnf command-line arguments to be reused by callers.
+    :rtype: list[str]
     """
     flags = [
         '--setopt=module_platform_id=platform:el{}'.format(get_major_version(target_version)),

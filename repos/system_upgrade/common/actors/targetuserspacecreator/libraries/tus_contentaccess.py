@@ -1,11 +1,14 @@
 """
-Content-access establishment inside the scratch container (§6).
+Establish content access inside the scratch container.
 
-Performed so that ``dnf`` inside scratch can see the target repos. Order matters
-(§4 step 3): RHUI client swap first (if any), then RHSM container-mode + product
-certificate, then the CentOS Stream ``$stream`` variable, then custom repofiles.
+This is done so that ``dnf`` running inside the scratch container can see the
+target repositories. The order of operations matters: the RHUI client is
+swapped first (only when cloud RHUI is in use), then RHSM is switched into
+container mode and to the target product certificate, then the CentOS Stream
+``$stream`` dnf variable is adjusted, and finally any custom repository files
+are installed.
 
-Mid-layer module: may import ``tus_rhui``; never the reverse.
+This module may import ``tus_rhui`` but is never imported by it.
 """
 
 import os
@@ -23,12 +26,20 @@ _DNF_STREAM_VAR = '/etc/dnf/vars/stream'
 
 def _adjust_dnf_stream_variable(context_scratch, target_major, varfile=_DNF_STREAM_VAR):
     """
-    Adjust the version in the dnf 'stream' variable to the target version.
+    Adjust the dnf ``stream`` variable to the target version.
 
-    URLs in CentOS Stream repofiles contain the $stream variable which,
-    if not adjusted, retains the value from the source system making
-    the URLs point to repos for the source version. This function adjusts
-    the variable so that the URLs point to the target version repos.
+    URLs in CentOS Stream repository files contain the ``$stream`` variable.
+    If it is not adjusted it keeps the value from the source system, which makes
+    the URLs point to repositories for the source version. This writes the target
+    value so that the URLs point to the target version repositories.
+
+    :param context_scratch: The scratch container in which the variable file is written.
+    :type context_scratch: mounting.IsolatedActions
+    :param target_major: The target system major version number.
+    :type target_major: int
+    :param varfile: Path to the dnf stream variable file inside the container.
+    :type varfile: str
+    :raises StopActorExecutionError: When the variable file cannot be written.
     """
 
     new_dnf_stream_val = f'{target_major}-stream\n'
@@ -43,15 +54,15 @@ def _adjust_dnf_stream_variable(context_scratch, target_major, varfile=_DNF_STRE
 
 def _install_custom_repofiles(context_scratch, custom_repofiles):
     """
-    Install the required custom repository files into the container.
+    Install the given custom repository files into the container.
 
-    The repository files are copied from the host into the /etc/yum.repos.d
-    directory into the container.
+    The repository files are copied from the host into the ``/etc/yum.repos.d``
+    directory inside the container.
 
-    :param context_scratch: the container where the repofiles should be copied
-    :type context_scratch: mounting.IsolatedActions class
-    :param custom_repofiles: list of custom repo files
-    :type custom_repofiles: List(CustomTargetRepositoryFile)
+    :param context_scratch: The scratch container to copy the repofiles into.
+    :type context_scratch: mounting.IsolatedActions
+    :param custom_repofiles: The custom repository files to install.
+    :type custom_repofiles: list[CustomTargetRepositoryFile]
     """
     for rfile in custom_repofiles:
         dst_path = os.path.join('/etc/yum.repos.d', os.path.basename(rfile.file))
@@ -60,12 +71,27 @@ def _install_custom_repofiles(context_scratch, custom_repofiles):
 
 def establish(context_scratch, inputs):
     """
-    Establish content access inside the scratch container (§6).
+    Establish content access inside the scratch container.
 
-    :param context_scratch: An entered nspawn scratch context_scratch.
+    Performs, in order: an RHUI client swap (only when cloud RHUI info is
+    available), switching RHSM into container mode and to the target product
+    certificate, adjusting the CentOS Stream ``$stream`` dnf variable for CentOS
+    targets, and installing custom repository files.
+
+    The product-certificate switch is intentionally left to propagate its
+    exception so that the caller can turn it into the appropriate inhibitor.
+
+    :param context_scratch: An entered nspawn scratch container.
+    :type context_scratch: mounting.NspawnActions
     :param inputs: The :class:`~.tus_inputdata.InputData` value object.
-    :raises rhsm.MissingTargetProductCertificate: propagated from
-        ``rhsm.switch_certificate`` - translated into inhibitor #1 by the caller.
+    :type inputs: tus_inputdata.InputData
+    :raises StopActorExecutionError: When the dnf ``$stream`` variable cannot be written.
+
+    .. seealso::
+        :func:`leapp.libraries.common.rhsm.switch_certificate` for the exception
+        raised when the target product certificate is missing.
+        :func:`leapp.libraries.actor.tus_rhui.perform_client_swap` for exceptions
+        raised during the RHUI client swap.
     """
     target_major = get_target_major_version()
 

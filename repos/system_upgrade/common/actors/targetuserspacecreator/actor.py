@@ -20,13 +20,14 @@ from leapp.tags import IPUWorkflowTag, TargetTransactionFactsPhaseTag
 
 class TargetUserspaceCreator(Actor):
     """
-    Initializes a directory to be populated as a minimal environment to run binaries from the target system.
+    Initialize a directory populated as a minimal environment for running target system binaries.
 
-    The target userspace is set up in a directory so one can run it in a containerized environment to perform tasks
-    as if the system running would be the target system. This allows us to use the target system RPM stack including
-    DNF which gives us the ability to use RPM features from the target system.
-    The userspace environment is also used to generate a initram disk with dracut using the target system binaries
-    such as kernel, systemd etc etc
+    The target userspace is set up in a directory so it can be entered as a containerized environment and used to
+    perform tasks as if the running system were already the target system. This provides access to the target system
+    RPM stack, including DNF, and therefore to RPM features from the target system. The userspace environment is also
+    used later to generate an initramfs with dracut using the target system binaries such as the kernel and systemd.
+
+    The work is delegated to :func:`leapp.libraries.actor.tus_userspacegen.perform`.
     """
 
     name = 'target_userspace_creator'

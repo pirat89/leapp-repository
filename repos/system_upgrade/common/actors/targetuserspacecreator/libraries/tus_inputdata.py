@@ -1,12 +1,13 @@
 """
-Input gathering and validation for the ``targetuserspacecreator`` actor (§2).
+Input gathering and validation for the ``targetuserspacecreator`` actor.
 
-Consumes every message the actor needs, applies the three hard-stop validation
-rules, and returns a single plain value object (:class:`InputData`) carrying the
-raw messages plus a few derived, frequently-needed values (the package list, the
-de-duplicated copy-file list, and the ``skip_rhsm`` / ``nogpgcheck`` toggles).
+Consumes every message the actor needs, applies three validation checks that
+stop the upgrade when their preconditions are not met, and returns a single
+plain value object (:class:`InputData`) carrying the raw messages plus a few
+derived, frequently-needed values (the package list, the de-duplicated
+copy-file list, and the ``skip_rhsm`` / ``nogpgcheck`` toggles).
 
-Leaf module: imports only shared leapp libraries and ``tus_constants``.
+Leaf module: imports only shared leapp libraries.
 """
 
 from leapp.exceptions import StopActorExecutionError
@@ -36,7 +37,13 @@ _DEFAULT_INSTALL_PKGS = {
 
 
 class InputData:  # pylint: disable=too-many-arguments
-    """Plain value object holding the validated actor inputs."""
+    """
+    Plain value object holding the validated actor inputs.
+
+    Bundles the raw messages consumed by the actor together with a handful of
+    derived values so downstream code receives a single, already-validated
+    object instead of re-consuming and re-checking messages.
+    """
 
     def __init__(self, storage_info, target_repositories, custom_repofiles,
                  rhsm_info, rhui_info, target_iso, repositories_facts,
@@ -59,11 +66,16 @@ def _normalize_copy_files(copy_files):
     """
     Fill the destination of every CopyFile whose ``dst`` is empty with its ``src``.
 
-    A null/empty ``dst`` means "copy to the same path as ``src``". Applying this
+    An empty ``dst`` means "copy to the same path as ``src``". Applying this
     convention once, here at the actor's input boundary, lets every downstream
-    consumer rely on ``dst`` always being populated instead of re-implementing the
-    ``dst or src`` fallback on each access. Mutates the given CopyFile objects in
-    place and returns the same list for convenient chaining.
+    consumer rely on ``dst`` always being populated instead of re-implementing
+    the ``dst or src`` fallback on each access. The given CopyFile objects are
+    mutated in place.
+
+    :param copy_files: CopyFile objects to normalize.
+    :type copy_files: list[CopyFile]
+    :returns: The same list that was passed in, for convenient chaining.
+    :rtype: list[CopyFile]
     """
     for copy_file in copy_files:
         if not copy_file.dst:
@@ -73,11 +85,17 @@ def _normalize_copy_files(copy_files):
 
 def _dedup_copy_files(copy_files):
     """
-    De-duplicate CopyFile entries by their (src, dst) pair, preserving order.
+    De-duplicate CopyFile entries by their ``(src, dst)`` pair, preserving order.
 
-    Expects ``dst`` to be already normalized (see :func:`_normalize_copy_files`),
-    so entries that differ only by an implicit vs. explicit destination collapse
-    into one.
+    Expects ``dst`` to be already populated (see :func:`_normalize_copy_files`),
+    so entries that differ only by an implicit versus explicit destination
+    collapse into one.
+
+    :param copy_files: CopyFile objects to de-duplicate.
+    :type copy_files: list[CopyFile]
+    :returns: A new list holding the first occurrence of each unique
+        ``(src, dst)`` pair, in the original order.
+    :rtype: list[CopyFile]
     """
     seen = set()
     result = []
@@ -92,9 +110,23 @@ def _dedup_copy_files(copy_files):
 
 def gather():
     """
-    Consume and validate all inputs; return an :class:`InputData`.
+    Consume and validate all actor inputs and return an :class:`InputData`.
 
-    :raises StopActorExecutionError: on any of the three §2 hard-stop rules.
+    Reads every message the actor depends on, enforces the validation checks
+    described below, builds the target-userspace package set (the built-in
+    defaults plus whatever the preupgrade tasks request), and normalizes and
+    de-duplicates the preupgrade copy-file list before wrapping everything in a
+    single value object. When RHUIInfo is present, its client-setup copy files
+    are normalized too (without de-duplication) so their destinations are
+    always populated.
+
+    :returns: The validated and derived actor inputs.
+    :rtype: InputData
+    :raises StopActorExecutionError: When no RHSMInfo message is available and
+        RHSM is not being skipped.
+    :raises StopActorExecutionError: When RHSM is being skipped yet an RHSMInfo
+        message was produced (an inconsistent set of collected facts).
+    :raises StopActorExecutionError: When no StorageInfo message is available.
     """
     storage_info = next(api.consume(StorageInfo), None)
     target_repositories = next(api.consume(TargetRepositories), None)
@@ -108,7 +140,7 @@ def gather():
 
     skip_rhsm = rhsm.skip_rhsm()
 
-    # Hard-stop #1: no RHSMInfo while RHSM is not being skipped.
+    # Stop the upgrade: no RHSMInfo while RHSM is not being skipped.
     if not rhsm_info and not skip_rhsm:
         # FIXME orig code has StopActorExecution and log
         raise StopActorExecutionError(
@@ -121,7 +153,7 @@ def gather():
             }
         )
 
-    # Hard-stop #2: RHSM is being skipped but RHSMInfo is present (inconsistent).
+    # Stop the upgrade: RHSM is being skipped but RHSMInfo is present (inconsistent).
     # FIXME: take a look, originally just a log, I think it's covered by error
     # somewhere else (earlier actor?) now..
     # FIXME: check also rest of arts
@@ -135,7 +167,7 @@ def gather():
             }
         )
 
-    # Hard-stop #3: no StorageInfo.
+    # Stop the upgrade: no StorageInfo.
     if not storage_info:
         raise StopActorExecutionError(
             message='Missing storage information.',

@@ -1,21 +1,25 @@
 """
-Cert and repository-file access for the freshly built target userspace.
+Make the source system's certificates and repository configuration available in the target userspace.
 
-Single responsibility: once the target userspace exists, make the source
-system's trust anchors and repository configuration available inside it without
-clobbering files the target packages own. Concretely: copy ``/etc/pki`` from the
-source (decoupling its symlinks), refresh the CA trust store, copy the RHSM
-configuration, and merge ``/etc/yum.repos.d`` while preserving any RPM-owned
-repofiles already present in the container.
+Once the target userspace has been built, this module copies the source
+system's trust anchors and repository configuration into it without overwriting
+files that the target packages own. Specifically it:
 
-The ``/etc/pki`` symlink-decoupling logic (``_choose_copy_or_link``,
-``_copy_symlinks``, ``_copy_decouple`` and ``_copy_certificates``) is a FROZEN
-CARVE-OUT: it is reproduced here byte-for-byte and must not be edited. It carries
-a known multi-hop-symlink bug (captured by an ``xfail`` characterization test)
-that is intentionally out of scope for this redesign.
+* copies ``/etc/pki`` from the source system, decoupling its symlinks so that
+  the resulting tree is self-contained;
+* refreshes the CA trust store inside the container;
+* copies the RHSM configuration (unless RHSM handling is skipped);
+* merges ``/etc/yum.repos.d`` while preserving any RPM-owned repofiles that
+  already exist in the container.
 
-This module depends only on shared leapp libraries - nothing actor-side - so it
-sits at the bottom of the actor's import DAG alongside ``layout``.
+The ``/etc/pki`` symlink-decoupling helpers (``_choose_copy_or_link``,
+``_copy_symlinks``, ``_copy_decouple`` and ``_copy_certificates``) are kept
+unchanged on purpose. They carry a known bug when handling multi-hop RPM-owned
+symlinks (covered by an xfail characterization test) that is deliberately left
+out of scope.
+
+This module depends only on shared leapp libraries, so it has no actor-side
+imports.
 """
 
 import os
@@ -25,12 +29,27 @@ from leapp.libraries.stdlib import api, CalledProcessError, run
 
 
 class BrokenSymlinkError(Exception):
-    """Raised when we encounter a broken symlink where we weren't expecting it."""
+    """Raised when a broken symlink is encountered where a valid one was expected."""
 
 
 def prep_repository_access(context, target_userspace):
     """
-    Prepare repository access by copying all relevant certificates and configuration files to the userspace
+    Copy the source system's certificates and repository configuration into the target userspace.
+
+    Copies the trust anchors from ``/etc/pki``, refreshes the CA trust store,
+    copies the RHSM configuration and merges ``/etc/yum.repos.d`` while keeping
+    the RPM-owned repofiles that already exist in the container.
+
+    :param context: Mounting context giving access to the source system tree.
+    :type context: mounting.IsolatedActions
+    :param target_userspace: Filesystem path to the target userspace container.
+    :type target_userspace: str
+    :raises CalledProcessError: If any of the underlying commands (file copies,
+        trust-store refresh, moves or removals) fails.
+    :raises ValueError: If a symlink processed while decoupling ``/etc/pki`` is
+        not given as an absolute path.
+    :raises RuntimeError: If the internal symlink-copy helper reports an unknown
+        action (programming error).
     """
     _copy_certificates(context, target_userspace)
     _refresh_ca_trust(target_userspace)
@@ -39,6 +58,16 @@ def prep_repository_access(context, target_userspace):
 
 
 def _refresh_ca_trust(target_userspace):
+    """
+    Refresh the CA trust store inside the target userspace.
+
+    Runs ``update-ca-trust`` through a login shell in a chroot of the target
+    userspace so that the newly copied certificates take effect.
+
+    :param target_userspace: Filesystem path to the target userspace container.
+    :type target_userspace: str
+    :raises CalledProcessError: If the ``update-ca-trust`` command fails.
+    """
     # NOTE(dkubek): context.call(['update-ca-trust']) seems to not be working.
     #               I am not really sure why. The changes to files are not
     #               being written to disk.
@@ -46,6 +75,20 @@ def _refresh_ca_trust(target_userspace):
 
 
 def _copy_rhsm_config(context, target_userspace):
+    """
+    Copy the source system's RHSM configuration into the target userspace.
+
+    Does nothing when RHSM handling is skipped. Otherwise it removes any
+    existing ``/etc/rhsm`` in the container and replaces it with a copy from the
+    source system.
+
+    :param context: Mounting context giving access to the source system tree.
+    :type context: mounting.IsolatedActions
+    :param target_userspace: Filesystem path to the target userspace container.
+    :type target_userspace: str
+    :raises CalledProcessError: If removing the existing ``/etc/rhsm`` directory
+        fails.
+    """
     if rhsm.skip_rhsm():
         return
     target_rhsm = os.path.join(target_userspace, 'etc', 'rhsm')
@@ -55,14 +98,21 @@ def _copy_rhsm_config(context, target_userspace):
 
 def _merge_repos_preserving_rpm_owned(context, target_userspace):
     """
-    Replace the container's yum.repos.d with the one from scratch, keeping repofiles owned by an RPM.
+    Replace the container's ``yum.repos.d`` with the scratch one, keeping RPM-owned repofiles.
 
-    We cannot simply remove the target yum.repos.d and swap in the one from the
-    scratch container we used to obtain the new DNF stack: although RHUI clients
-    are installed in both containers, users can request packages that install
-    additional repofiles into the target userspace which are not present in
-    scratch. Such RPM-owned repofiles are detected, preserved across the swap,
-    and restored afterwards.
+    The target ``yum.repos.d`` cannot simply be discarded: although RHUI clients
+    are installed in both containers, requested packages may install extra
+    repofiles into the target userspace that are absent from the scratch
+    container used to obtain the new DNF stack. Such RPM-owned repofiles are
+    detected before the swap and restored afterwards; in between, the scratch
+    ``yum.repos.d`` (carrying the new DNF stack and RHUI client) is copied in.
+
+    :param context: Mounting context giving access to the scratch container tree.
+    :type context: mounting.IsolatedActions
+    :param target_userspace: Filesystem path to the target userspace container.
+    :type target_userspace: str
+    :raises CalledProcessError: If moving, copying or removing the repository
+        directories or files fails.
     """
     target_etc = os.path.join(target_userspace, 'etc')
     target_yum_repos_d = os.path.join(target_etc, 'yum.repos.d')
@@ -91,19 +141,30 @@ def _merge_repos_preserving_rpm_owned(context, target_userspace):
 
 def _get_files_owned_by_rpms(context, dirpath, pkgs=None, recursive=False):
     """
-    Return the list of file names inside dirpath owned by RPMs.
+    Return the names of files inside ``dirpath`` that are owned by an installed RPM.
 
-    The returned paths are relative to the dirpath.
+    The returned paths are relative to ``dirpath``. This matters for example
+    with RHUI, which installs specific repo files into the ``yum.repos.d``
+    directory.
 
-    This is important e.g. in case of RHUI which installs specific repo files
-    in the yum.repos.d directory.
+    When ``pkgs`` is ``None`` or empty, every RPM-owned file is returned.
+    Otherwise only files owned by one of the listed packages are returned.
 
-    In case the pkgs param is None or empty, do not filter any specific rpms.
-    Otherwise return filenames that are owned by any pkg in the given list.
+    When ``recursive`` is ``True``, the whole directory tree rooted at
+    ``dirpath`` is scanned (the ``directory-hash`` subtree is skipped for
+    performance, as it is not relevant to the upgrade). Otherwise only the
+    direct entries of ``dirpath`` are checked.
 
-    If the recursive param is set to True, all files owned by a package in the
-    directory tree starting at dirpath are returned. Otherwise, only the
-    files within dirpath are checked.
+    :param context: Mounting context used to resolve paths and run ``rpm`` queries.
+    :type context: mounting.NspawnActions
+    :param dirpath: Directory to inspect, given as a path inside the context.
+    :type dirpath: str
+    :param pkgs: Optional iterable of package names used to filter the results.
+    :type pkgs: collections.abc.Iterable[str]
+    :param recursive: Whether to scan the directory tree recursively.
+    :type recursive: bool
+    :returns: File names (relative to ``dirpath``) owned by a matching RPM.
+    :rtype: list[str]
     """
 
     files_owned_by_rpms = []
@@ -145,14 +206,18 @@ def _get_files_owned_by_rpms(context, dirpath, pkgs=None, recursive=False):
 
 def _mkdir_with_copied_mode(path, mode_from):
     """
-    Create directories with a file to copy the mode from.
+    Create a directory and copy its mode from an existing reference path.
+
+    The directory (and any missing parents) is first created with the most
+    restrictive permissions and then its mode is set to match ``mode_from``.
 
     :param path: The directory path to create.
-    :param mode_from: A file or directory whose mode we will copy to the
-        newly created directory.
-    :raises subprocess.CalledProcessError: mkdir or chmod fails. For instance,
-        the directory already exists, the file to get permissions from does
-        not exist, a parent directory does not exist.
+    :type path: str
+    :param mode_from: A file or directory whose mode is copied onto the newly
+        created directory.
+    :type mode_from: str
+    :raises CalledProcessError: If ``mkdir`` or ``chmod`` fails, for instance
+        when ``mode_from`` does not exist.
     """
     # Create with maximally restrictive permissions
     run(['mkdir', '-m', '0', '-p', path])
@@ -171,26 +236,26 @@ def _mkdir_with_copied_mode(path, mode_from):
 # ---------------------------------------------------------------------------
 def _choose_copy_or_link(symlink, srcdir):
     """
-    Determine whether to copy file contents or create a symlink depending on where the pointee resides.
+    Decide whether to copy a symlink's target contents or recreate it as a link.
 
-    :param symlink: The source symlink to follow.  This must be an absolute path.
-    :param srcdir: The root directory that every piece of content must be present in.
-    :returns: A tuple of action and sourcefile.  Action is one of 'copy' or 'link' and means that
-        the caller should either copy the sourcefile to the target location or create a symlink from
-        the sourcefile to the target location.  sourcefile is the path to the file that should be
-        the source of the operation.  It is either a real file outside of the srcdir hierarchy or
-        a file (real, directory, symlink or otherwise) inside of the srcdir hierarchy.
-    :raises ValueError: if the arguments are not correct
-    :raises BrokenSymlinkError: if the symlink is invalid
+    Follow the symlink chain starting at ``symlink``. If the chain reaches a
+    target that lives inside ``srcdir``, return a ``link`` action together with a
+    corrected link path (absolute or relative, matching the original link);
+    symlinks pointing outside ``srcdir`` are skipped while walking the chain. If
+    the chain ends at a real file or directory outside ``srcdir``, return a
+    ``copy`` action with the path of that real file.
 
-    Determine whether the file pointed to by the symlink chain is within srcdir.  If it is within,
-    then create a synlink that points from symlink to it.
-
-    If it is not within, then walk the symlink chain until we find something that is within srcdir
-    and return that. This means we will omit any symlinks that are outside of srcdir from
-    the symlink chain.
-
-    If we reach a real file and it is outside of srcdir, then copy the file instead.
+    :param symlink: The source symlink to follow. Must be an absolute path.
+    :type symlink: str
+    :param srcdir: The root directory that the content must reside in.
+    :type srcdir: str
+    :returns: A 2-tuple ``(action, sourcefile)`` where ``action`` is ``'copy'``
+        or ``'link'`` and ``sourcefile`` is the path the caller should copy from
+        or link to.
+    :rtype: tuple[str, str]
+    :raises ValueError: If ``symlink`` is not an absolute path.
+    :raises BrokenSymlinkError: If ``symlink`` is broken or forms a
+        self-referential loop.
     """
     if not symlink.startswith('/'):
         raise ValueError('File{} must be an absolute path!'.format(symlink))
@@ -277,13 +342,23 @@ def _choose_copy_or_link(symlink, srcdir):
 
 def _copy_symlinks(symlinks_to_process, srcdir):
     """
-    Copy file contents or create a symlink depending on where the pointee resides.
+    Process a list of symlinks, copying their contents or recreating them as links.
 
-    :param symlinks_to_process: List of 2-tuples of (src_path, target_path).  Each src_path
-        should be an absolute path to the symlink.  target_path is the path to where we
-        need to create either a link or a copy.
-    :param srcdir: The root directory that every piece of content must be present in.
-    :raises ValueError: if the arguments are not correct
+    For each entry the decision is delegated to the helper that follows the
+    symlink chain: content whose ultimate target lies outside ``srcdir`` is
+    copied, otherwise a corresponding link is created. Broken symlinks are logged
+    and skipped.
+
+    :param symlinks_to_process: Iterable of ``(src_path, target_path)`` tuples.
+        ``src_path`` must be an absolute path to the symlink; ``target_path`` is
+        where the link or copy is created.
+    :type symlinks_to_process: list[tuple[str, str]]
+    :param srcdir: The root directory that the content must reside in.
+    :type srcdir: str
+    :raises ValueError: If a processed symlink is not an absolute path.
+    :raises RuntimeError: If the internal decision helper returns an unknown
+        action (programming error).
+    :raises CalledProcessError: If copying the file or creating the link fails.
     """
     for source_linkpath, target_linkpath in symlinks_to_process:
         try:
@@ -306,16 +381,27 @@ def _copy_symlinks(symlinks_to_process, srcdir):
 
 def _copy_decouple(srcdir, dstdir):
     """
-    Copy files inside of `srcdir` to `dstdir` while decoupling symlinks.
+    Copy ``srcdir`` into ``dstdir`` while decoupling symlinks that point outside ``srcdir``.
 
-    What we mean by decoupling the `srcdir` is that any symlinks pointing
-    outside the directory will be copied as regular files. This means that the
-    directory will become independent from its surroundings with respect to
-    symlinks. Any symlink (or symlink chains) within the directory will be
-    preserved.
+    Decoupling means that any symlink (or symlink chain) leaving ``srcdir`` is
+    materialised as a regular copy of its target, so the resulting tree does not
+    depend on anything outside itself. Symlinks that stay within ``srcdir`` are
+    preserved as links. Directories are recreated with the same mode as their
+    source.
+
+    :param srcdir: Directory tree to copy from.
+    :type srcdir: str
+    :param dstdir: Destination directory, which must already exist.
+    :type dstdir: str
+    :raises ValueError: If a symlink encountered during the walk is not an
+        absolute path.
+    :raises RuntimeError: If the internal symlink-copy helper returns an unknown
+        action (programming error).
+    :raises CalledProcessError: If creating a directory, copying a file or
+        creating a link fails.
 
     .. warning::
-        `dstdir` must already exist.
+        ``dstdir`` must already exist.
     """
     for root, directories, files in os.walk(srcdir):
         # relative path from srcdir because srcdir is replaced with dstdir for
@@ -361,15 +447,23 @@ def _copy_decouple(srcdir, dstdir):
 
 def _copy_certificates(context, target_userspace):
     """
-    Copy certificates from source system into the container, but preserve
-    original ones
+    Copy the source system's ``/etc/pki`` into the container, preserving package-owned files.
 
-    Some certificates are already installed in the container and those are
-    default certificates for the target OS, so we preserve these.
+    The container already ships default certificates for the target OS that are
+    owned by RPMs; those take precedence and are preserved. The source
+    ``/etc/pki`` is copied in with its internal symlink hierarchy decoupled, then
+    the RPM-owned files from the original container tree are restored on top.
+    Dangling symlinks among the restored files are logged and skipped.
 
-    We respect the symlink hierarchy of the source system within the /etc/pki
-    folder. Dangling symlinks will be ignored.
-
+    :param context: Mounting context giving access to the source system tree.
+    :type context: mounting.IsolatedActions
+    :param target_userspace: Filesystem path to the target userspace container.
+    :type target_userspace: str
+    :raises CalledProcessError: If backing up, copying or removing files fails.
+    :raises ValueError: If a symlink processed while decoupling is not an
+        absolute path.
+    :raises RuntimeError: If the internal symlink-copy helper returns an unknown
+        action (programming error).
     """
 
     target_pki = os.path.join(target_userspace, 'etc', 'pki')

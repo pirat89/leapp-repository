@@ -1,14 +1,14 @@
 """
-On-disk layout, scratch/overlay/nspawn setup, and the dev-only persistent
-package cache for the ``targetuserspacecreator`` actor (§5, §12).
+On-disk layout, scratch/overlay/nspawn setup, and the developer-only
+persistent package cache for the ``targetuserspacecreator`` actor.
 
-:func:`compute` resolves all the paths the actor works with (honouring
-``LEAPP_CONTAINER_ROOT``) and the reserved free space for the overlay.
-:func:`scratch_container` is the context manager that builds the source overlay,
-optionally mounts the target ISO into the container root, and enters the result
-as an nspawn scratch container - guaranteeing reverse-order teardown.
+:func:`compute` resolves all the paths the actor works with, honouring the
+``LEAPP_CONTAINER_ROOT`` environment variable. :func:`scratch_container` is the
+context manager that builds the source overlay, optionally mounts the target
+ISO into the container root, and enters the result as an nspawn scratch
+container, guaranteeing that each layer is torn down in reverse order.
 
-Leaf module: imports only shared leapp libraries and ``tus_constants``.
+This is a leaf module: it imports only shared leapp libraries.
 """
 
 import contextlib
@@ -31,7 +31,7 @@ _PERSISTENT_PKG_CACHE_DIRNAME = 'persistent_package_cache'
 
 
 class Layout:
-    """Plain value object describing where the actor builds the userspace."""
+    """Value object describing where the actor builds the target userspace."""
 
     def __init__(
         self,
@@ -42,6 +42,22 @@ class Layout:
         installroot_overlay_mountpoint,
         persistent_pkg_cache_path,
     ):
+        """
+        Initialize the layout value object.
+
+        :param container_root: Root directory under which everything is created.
+        :type container_root: str
+        :param userspace_path: Path to the target userspace directory.
+        :type userspace_path: str
+        :param scratch_dir: Path to the scratch directory used for overlays.
+        :type scratch_dir: str
+        :param mounts_dir: Path to the directory holding overlay mounts.
+        :type mounts_dir: str
+        :param installroot_overlay_mountpoint: Mountpoint of the install-root overlay.
+        :type installroot_overlay_mountpoint: str
+        :param persistent_pkg_cache_path: Path to the developer-only persistent package cache.
+        :type persistent_pkg_cache_path: str
+        """
         self.container_root = container_root
         self.userspace_path = userspace_path
         self.scratch_dir = scratch_dir
@@ -51,7 +67,16 @@ class Layout:
 
 
 def compute():
-    """Resolve the on-disk layout and the recommended overlay free-space reserve."""
+    """
+    Resolve the on-disk layout used by the actor.
+
+    Reads the ``LEAPP_CONTAINER_ROOT`` environment variable (falling back to a
+    default) and derives all the paths the actor works with from the target
+    major version.
+
+    :returns: The resolved layout of paths.
+    :rtype: Layout
+    """
     container_root = get_env('LEAPP_CONTAINER_ROOT', _DEFAULT_CONTAINER_ROOT)
     target_major = get_target_major_version()
 
@@ -76,15 +101,22 @@ def compute():
 @contextlib.contextmanager
 def scratch_container(layout, inputs):
     """
-    Establish the scratch container and yield an entered nspawn context (§5).
+    Build the scratch container and yield an entered nspawn context.
 
-    Nesting (each layer torn down in reverse order on exit):
-      source overlay  ->  optional target-ISO mount into the container root
-                      ->  nspawn into the overlay.
+    The layers are nested and each is torn down in reverse order on exit: the
+    source overlay is created first, then the target ISO is optionally mounted
+    into the container root, and finally the overlay is entered as an nspawn
+    scratch container.
 
     :param layout: The :class:`Layout` produced by :func:`compute`.
+    :type layout: Layout
     :param inputs: The :class:`~.tus_inputdata.InputData` value object.
+    :type inputs: tus_inputdata.InputData
     :yields: An entered ``mounting.NspawnActions`` scratch context.
+
+    .. seealso::
+        :func:`leapp.libraries.common.overlaygen.create_source_overlay` for
+        exceptions raised while building the source overlay.
     """
     scratch_reserve = overlaygen.get_recommended_leapp_free_space(layout.userspace_path)
     with overlaygen.create_source_overlay(
