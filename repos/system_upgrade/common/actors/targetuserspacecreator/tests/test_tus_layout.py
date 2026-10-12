@@ -89,7 +89,7 @@ def _target_major():
 
 @pytest.mark.parametrize(('dst_ver', 'dst_maj_ver', 'container_root'), (
     ('9.6', '9', None),
-    ('9.6', '9','/foo/path/'),
+    ('9.6', '9', '/foo/path/'),
     ('10', '10', None),
 
 ))
