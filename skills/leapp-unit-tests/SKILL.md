@@ -36,6 +36,7 @@ import pytest  # Only if using parametrize or fixtures
 
 from leapp.libraries.common.testutils import CurrentActorMocked, logger_mocked
 from leapp.libraries.stdlib import api, CalledProcessError
+
 # Import the module being tested
 # Import any required models
 ```
