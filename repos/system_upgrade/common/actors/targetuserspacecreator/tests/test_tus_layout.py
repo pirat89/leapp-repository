@@ -131,7 +131,6 @@ def test_compute_layout(monkeypatch, override, container_root):
     assert layout.mounts_dir == os.path.join(container_root, 'scratch', 'mounts')
     assert layout.installroot_overlay_mountpoint == '/el9target'
     assert layout.persistent_pkg_cache_path == os.path.join(container_root, 'persistent_package_cache')
-    assert free_space.called_with == [layout.userspace_path]
 
 
 def test_scratch_container(monkeypatch):
@@ -154,6 +153,7 @@ def test_scratch_container(monkeypatch):
     )
     inputs = MockInputData(storage_info='STORAGE_INFO', target_iso='TARGET_ISO')
 
+    assert free_space.called_with == [layout.userspace_path]
     with tus_layout.scratch_container(layout, inputs) as yielded:
         assert yielded is scratch
         assert overlay.entered is True
