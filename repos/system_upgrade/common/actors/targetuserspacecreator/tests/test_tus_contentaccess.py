@@ -1,19 +1,12 @@
 from unittest import mock
 
 import pytest
-from test_tus_mock_utils import MockContext, MockInputData
+from test_tus_mock_utils import make_rhui_info, MockContext, MockInputData
 
 from leapp.exceptions import StopActorExecutionError
 from leapp.libraries.actor import tus_contentaccess
 from leapp.libraries.common.testutils import CurrentActorMocked, logger_mocked
-from leapp.models import (
-    CustomTargetRepositoryFile,
-    RHSMInfo,
-    RHUIInfo,
-    TargetRHUIPostInstallTasks,
-    TargetRHUIPreInstallTasks,
-    TargetRHUISetupInfo
-)
+from leapp.models import CustomTargetRepositoryFile, RHSMInfo
 
 
 @pytest.mark.parametrize(('version', 'exp_str'), (
@@ -52,19 +45,6 @@ def test_install_custom_repofiles_empty():
     context = MockContext()
     tus_contentaccess._install_custom_repofiles(context, [])
     assert not context.copy_to_calls
-
-
-def _make_RHUIInfo():
-    setup_info = TargetRHUISetupInfo(
-        preinstall_tasks=TargetRHUIPreInstallTasks(),
-        postinstall_tasks=TargetRHUIPostInstallTasks()
-    )
-    return RHUIInfo(
-        provider='aws',
-        src_client_pkg_names=['rh-amazon-rhui-client'],
-        target_client_pkg_names=['rh-amazon-rhui-client'],
-        target_client_setup_info=setup_info
-    )
 
 
 def _setup_establish(monkeypatch, distro_id, target_version='9.6'):
@@ -141,7 +121,7 @@ def test_establish_rhel_with_rhui(monkeypatch, target_version):
         monkeypatch, 'rhel', target_version
     )
 
-    rhui_info = _make_RHUIInfo()
+    rhui_info = make_rhui_info()
     inputs = MockInputData(rhui_info=rhui_info, rhsm_info=None, custom_repofiles=[], skip_rhsm=True)
 
     tus_contentaccess.establish(context, inputs)

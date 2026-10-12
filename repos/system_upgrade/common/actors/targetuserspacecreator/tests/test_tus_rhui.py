@@ -3,7 +3,7 @@
 import os
 
 import pytest
-from test_tus_mock_utils import make_cpe, MockContext
+from test_tus_mock_utils import make_cpe, make_rhui_info, MockContext
 
 from leapp.exceptions import StopActorExecutionError
 from leapp.libraries.actor import tus_constants, tus_rhui
@@ -14,48 +14,11 @@ from leapp.models import (
     CopyFile,
     RepositoryData,
     RepositoryFile,
-    RHUIInfo,
     TargetRHUIPostInstallTasks,
-    TargetRHUIPreInstallTasks,
-    TargetRHUISetupInfo
+    TargetRHUIPreInstallTasks
 )
 
 _SWAP_SCRIPT_PATH = '/leapp-rhui-swap.dnfsh'
-
-
-def _make_setup_info(bootstrap=True, enable_only=True, preinstall_copies=None,
-                     files_to_remove=None, postinstall_copies=None, supporting=None):
-    preinstall = TargetRHUIPreInstallTasks(
-        files_to_remove=files_to_remove or [],
-        files_to_copy_into_overlay=preinstall_copies or [],
-    )
-    postinstall = TargetRHUIPostInstallTasks(files_to_copy=postinstall_copies or [])
-    return TargetRHUISetupInfo(
-        enable_only_repoids_in_copied_files=enable_only,
-        preinstall_tasks=preinstall,
-        postinstall_tasks=postinstall,
-        files_supporting_client_operation=supporting or [],
-        bootstrap_target_client=bootstrap,
-    )
-
-
-def _make_rhui_info(bootstrap=True, enable_only=True, preinstall_copies=None,
-                    src_pkgs=None, target_pkgs=None, files_to_remove=None,
-                    postinstall_copies=None, supporting=None):
-    setup = _make_setup_info(
-        bootstrap=bootstrap,
-        enable_only=enable_only,
-        preinstall_copies=preinstall_copies,
-        files_to_remove=files_to_remove,
-        postinstall_copies=postinstall_copies,
-        supporting=supporting,
-    )
-    return RHUIInfo(
-        provider='aws',
-        src_client_pkg_names=src_pkgs if src_pkgs is not None else ['src-client'],
-        target_client_pkg_names=target_pkgs if target_pkgs is not None else ['target-client'],
-        target_client_setup_info=setup,
-    )
 
 
 @pytest.mark.parametrize(
@@ -200,7 +163,7 @@ def test_discover_client_exposed_repoids_success(monkeypatch):
     )
     monkeypatch.setattr(tus_rhui, '_repofiles_copied_at_setup', lambda c, f: set())
     monkeypatch.setattr(tus_rhui, '_dnf_repolist_repoids', lambda c, v: {'repoA'})
-    rhui_info = _make_rhui_info(bootstrap=True)
+    rhui_info = make_rhui_info(bootstrap=True)
     result = tus_rhui.discover_client_exposed_repoids(ctx, rhui_info, '9.6')
     assert result == {'repoA'}
     # os.rename operates on the real filesystem path (context.full_path), not the
@@ -223,7 +186,7 @@ def test_discover_client_exposed_repoids_failure_reverts(monkeypatch):
         raise make_cpe(stderr='repolist failed')
 
     monkeypatch.setattr(tus_rhui, '_dnf_repolist_repoids', _boom)
-    rhui_info = _make_rhui_info(bootstrap=True)
+    rhui_info = make_rhui_info(bootstrap=True)
     with pytest.raises(StopActorExecutionError):
         tus_rhui.discover_client_exposed_repoids(ctx, rhui_info, '9.6')
     # The finally block restores the hidden repofile even when dnf repolist fails.
@@ -244,7 +207,7 @@ def test_discover_client_exposed_repoids_no_bootstrap(monkeypatch):
     monkeypatch.setattr(tus_rhui, '_find_rhui_client_repofiles', _no_client_repofiles)
     monkeypatch.setattr(tus_rhui, '_repofiles_copied_at_setup', lambda c, f: set())
     monkeypatch.setattr(tus_rhui, '_dnf_repolist_repoids', lambda c, v: {'repoA'})
-    rhui_info = _make_rhui_info(bootstrap=False)
+    rhui_info = make_rhui_info(bootstrap=False)
     result = tus_rhui.discover_client_exposed_repoids(ctx, rhui_info, '9.6')
     assert result == {'repoA'}
     # With no client repofiles kept visible, the only existing repofile is foreign
@@ -284,7 +247,7 @@ def test_parse_repoids_from_copied_files_invalid(monkeypatch):
 
 def test_swap_clients_success():
     ctx = MockContext()
-    rhui_info = _make_rhui_info(src_pkgs=['old-client'], target_pkgs=['new-client'])
+    rhui_info = make_rhui_info(src_pkgs=['old-client'], target_pkgs=['new-client'])
     tus_rhui._swap_clients(ctx, rhui_info, '9.6', False, set())
     assert ctx.written_files[_SWAP_SCRIPT_PATH] == 'remove old-client\ninstall new-client\ntransaction run\n'
     expected_cmd = ['dnf', 'shell', '-y']
@@ -296,7 +259,7 @@ def test_swap_clients_success():
 
 def test_swap_clients_enable_only_no_src():
     ctx = MockContext()
-    rhui_info = _make_rhui_info(src_pkgs=[], target_pkgs=['new-client'])
+    rhui_info = make_rhui_info(src_pkgs=[], target_pkgs=['new-client'])
     tus_rhui._swap_clients(ctx, rhui_info, '9.6', True, {'repoB', 'repoA'})
     assert ctx.written_files[_SWAP_SCRIPT_PATH] == 'install new-client\ntransaction run\n'
     expected_cmd = ['dnf', 'shell', '-y']
@@ -310,7 +273,7 @@ def test_swap_clients_enable_only_no_src():
 
 def test_swap_clients_failure_removes_script():
     ctx = MockContext(raise_on_call=make_cpe(stderr='swap failed'))
-    rhui_info = _make_rhui_info(src_pkgs=['old'], target_pkgs=['new'])
+    rhui_info = make_rhui_info(src_pkgs=['old'], target_pkgs=['new'])
     with pytest.raises(StopActorExecutionError):
         tus_rhui._swap_clients(ctx, rhui_info, '9.6', False, set())
     assert ctx.remove_calls == [_SWAP_SCRIPT_PATH]
@@ -358,7 +321,7 @@ def test_remove_nonclient_injected_files(monkeypatch):
         CopyFile(src='/h/support.cfg', dst='/etc/support.cfg'),
         CopyFile(src='/h/junk.repo', dst='/etc/junk.repo'),
     ]
-    rhui_info = _make_rhui_info(preinstall_copies=copies, supporting=['/h/support.cfg'])
+    rhui_info = make_rhui_info(preinstall_copies=copies, supporting=['/h/support.cfg'])
     tus_rhui._remove_nonclient_injected_files(ctx, rhui_info, {'/etc/client.repo'})
     assert ctx.remove_calls == ['/etc/junk.repo']
 
@@ -374,7 +337,7 @@ def test_perform_client_swap_no_bootstrap(monkeypatch):
     monkeypatch.setattr(tus_rhui, '_run_preinstall_tasks', lambda c, t: calls.append('preinstall'))
     monkeypatch.setattr(tus_rhui, '_swap_clients', lambda *a: calls.append('swap'))
     ctx = MockContext()
-    rhui_info = _make_rhui_info(bootstrap=False)
+    rhui_info = make_rhui_info(bootstrap=False)
     tus_rhui.perform_client_swap(ctx, rhui_info, '9.6', False)
     assert calls == ['preinstall']
 
@@ -395,7 +358,7 @@ def test_perform_client_swap_full(monkeypatch):
     monkeypatch.setattr(tus_rhui, '_remove_nonclient_injected_files', lambda c, info, cf: calls.append('remove'))
     ctx = MockContext()
     copies = [CopyFile(src='/h/a.repo', dst='/etc/a.repo')]
-    rhui_info = _make_rhui_info(bootstrap=True, enable_only=True, preinstall_copies=copies)
+    rhui_info = make_rhui_info(bootstrap=True, enable_only=True, preinstall_copies=copies)
     tus_rhui.perform_client_swap(ctx, rhui_info, '9.6', False)
     assert calls == ['preinstall', 'swap', 'postinstall', 'remove']
     assert swapped['enable'] == {'repoX'}
@@ -419,7 +382,7 @@ def test_perform_client_swap_no_enable_only(monkeypatch):
     monkeypatch.setattr(tus_rhui, '_remove_nonclient_injected_files', lambda c, info, cf: None)
     ctx = MockContext()
     copies = [CopyFile(src='/h/a.repo', dst='/etc/a.repo')]
-    rhui_info = _make_rhui_info(bootstrap=True, enable_only=False, preinstall_copies=copies)
+    rhui_info = make_rhui_info(bootstrap=True, enable_only=False, preinstall_copies=copies)
     tus_rhui.perform_client_swap(ctx, rhui_info, '9.6', False)
     assert swapped['enable'] == set()
 
@@ -441,7 +404,7 @@ def test_perform_client_swap_enable_only_without_copies(monkeypatch):
     monkeypatch.setattr(tus_rhui, '_find_rhui_client_files', lambda c, p, v: set())
     monkeypatch.setattr(tus_rhui, '_remove_nonclient_injected_files', lambda c, info, cf: None)
     ctx = MockContext()
-    rhui_info = _make_rhui_info(bootstrap=True, enable_only=True, preinstall_copies=[])
+    rhui_info = make_rhui_info(bootstrap=True, enable_only=True, preinstall_copies=[])
     tus_rhui.perform_client_swap(ctx, rhui_info, '9.6', False)
     assert swapped['enable'] == set()
 
@@ -470,6 +433,6 @@ def test_cleanup_injected_repofiles(monkeypatch):
         CopyFile(src='/h/b.repo', dst='/etc/b.repo'),
         CopyFile(src='/h/c.conf', dst='/etc/c.conf'),
     ]
-    rhui_info = _make_rhui_info(preinstall_copies=copies)
+    rhui_info = make_rhui_info(preinstall_copies=copies)
     tus_rhui.cleanup_injected_repofiles(ctx, rhui_info)
     assert ctx.remove_calls == ['/etc/b.repo']

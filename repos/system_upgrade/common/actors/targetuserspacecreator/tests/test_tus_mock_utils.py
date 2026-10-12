@@ -10,6 +10,7 @@ the tests; pytest collects it and simply finds nothing to run.
 import os
 
 from leapp.libraries.stdlib import CalledProcessError
+from leapp.models import RHUIInfo, TargetRHUIPostInstallTasks, TargetRHUIPreInstallTasks, TargetRHUISetupInfo
 
 
 class _MockFileHandle:
@@ -90,6 +91,43 @@ def make_cpe(message='Command failed', command=None, stdout='', stderr='error', 
         message,
         command if command is not None else ['some', 'cmd'],
         {'stdout': stdout, 'stderr': stderr, 'exit_code': exit_code},
+    )
+
+
+def _make_setup_info(bootstrap=True, enable_only=True, preinstall_copies=None,
+                     files_to_remove=None, postinstall_copies=None, supporting=None):
+    """Build a :class:`TargetRHUISetupInfo` with test-friendly defaults."""
+    preinstall = TargetRHUIPreInstallTasks(
+        files_to_remove=files_to_remove or [],
+        files_to_copy_into_overlay=preinstall_copies or [],
+    )
+    postinstall = TargetRHUIPostInstallTasks(files_to_copy=postinstall_copies or [])
+    return TargetRHUISetupInfo(
+        enable_only_repoids_in_copied_files=enable_only,
+        preinstall_tasks=preinstall,
+        postinstall_tasks=postinstall,
+        files_supporting_client_operation=supporting or [],
+        bootstrap_target_client=bootstrap,
+    )
+
+
+def make_rhui_info(bootstrap=True, enable_only=True, preinstall_copies=None,
+                   src_pkgs=None, target_pkgs=None, files_to_remove=None,
+                   postinstall_copies=None, supporting=None):
+    """Build a :class:`RHUIInfo` wrapping :func:`_make_setup_info`."""
+    setup = _make_setup_info(
+        bootstrap=bootstrap,
+        enable_only=enable_only,
+        preinstall_copies=preinstall_copies,
+        files_to_remove=files_to_remove,
+        postinstall_copies=postinstall_copies,
+        supporting=supporting,
+    )
+    return RHUIInfo(
+        provider='aws',
+        src_client_pkg_names=src_pkgs if src_pkgs is not None else ['src-client'],
+        target_client_pkg_names=target_pkgs if target_pkgs is not None else ['target-client'],
+        target_client_setup_info=setup,
     )
 
 
