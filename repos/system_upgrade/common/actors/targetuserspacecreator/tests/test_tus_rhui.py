@@ -33,18 +33,20 @@ def test_copy_file_dst(src, dst, expected):
     assert tus_rhui._copy_file_dst(CopyFile(src=src, dst=dst)) == expected
 
 
-def test_resolve_copy_target_dir(monkeypatch):
-    ctx = MockContext(base_dir='/scratch')
-    monkeypatch.setattr(os.path, 'isdir', lambda p: p == '/scratch/etc/dir')
-    cfile = CopyFile(src='/host/file.repo', dst='/etc/dir')
-    assert tus_rhui._resolve_copy_target(ctx, cfile) == '/etc/dir/file.repo'
-
-
-def test_resolve_copy_target_not_dir(monkeypatch):
-    ctx = MockContext()
-    monkeypatch.setattr(os.path, 'isdir', lambda p: False)
-    cfile = CopyFile(src='/host/file.repo', dst='/etc/target.repo')
-    assert tus_rhui._resolve_copy_target(ctx, cfile) == '/etc/target.repo'
+@pytest.mark.parametrize(
+    ('base_dir', 'isdir_path', 'src', 'dst', 'expected'),
+    [
+        # dst resolves to an existing dir -> file lands at dst/basename(src).
+        # isdir is True only for the full_path of dst, proving full_path is applied.
+        ('/scratch', '/scratch/etc/dir', '/host/file.repo', '/etc/dir', '/etc/dir/file.repo'),
+        # dst is not a dir -> used unchanged (isdir_path matches nothing).
+        ('/base', None, '/host/file.repo', '/etc/target.repo', '/etc/target.repo'),
+    ]
+)
+def test_resolve_copy_target(monkeypatch, base_dir, isdir_path, src, dst, expected):
+    ctx = MockContext(base_dir=base_dir)
+    monkeypatch.setattr(os.path, 'isdir', lambda p: p == isdir_path)
+    assert tus_rhui._resolve_copy_target(ctx, CopyFile(src=src, dst=dst)) == expected
 
 
 def test_sanitized_copy_files_iter_sorts_by_dst(monkeypatch):
@@ -364,12 +366,26 @@ def test_perform_client_swap_full(monkeypatch):
     assert swapped['enable'] == {'repoX'}
 
 
-def test_perform_client_swap_no_enable_only(monkeypatch):
+@pytest.mark.parametrize(
+    ('enable_only', 'preinstall_copies'),
+    [
+        # Toggle off (even though copies exist) -> parsing skipped.
+        pytest.param(False, [CopyFile(src='/h/a.repo', dst='/etc/a.repo')], id='enable-flag-off'),
+        # Toggle on but no copies to parse -> parsing skipped.
+        pytest.param(True, [], id='no-preinstall-copies'),
+    ]
+)
+def test_perform_client_swap_enable_repoids_stays_empty(monkeypatch, enable_only, preinstall_copies):
+    """
+    ``enable_only_repoids`` stays empty unless the toggle is set AND preinstall
+    copies exist. In either single-condition case the copied-files repoid parsing
+    is skipped and the swap is run without restricting the enabled repos.
+    """
     swapped = {}
     monkeypatch.setattr(tus_rhui, '_run_preinstall_tasks', lambda c, t: None)
 
     def _no_parse(f):
-        raise AssertionError('_parse_repoids_from_copied_files should not be called')
+        raise AssertionError('_parse_repoids_from_copied_files must not be called')
 
     monkeypatch.setattr(tus_rhui, '_parse_repoids_from_copied_files', _no_parse)
 
@@ -381,30 +397,7 @@ def test_perform_client_swap_no_enable_only(monkeypatch):
     monkeypatch.setattr(tus_rhui, '_find_rhui_client_files', lambda c, p, v: set())
     monkeypatch.setattr(tus_rhui, '_remove_nonclient_injected_files', lambda c, info, cf: None)
     ctx = MockContext()
-    copies = [CopyFile(src='/h/a.repo', dst='/etc/a.repo')]
-    rhui_info = make_rhui_info(bootstrap=True, enable_only=False, preinstall_copies=copies)
-    tus_rhui.perform_client_swap(ctx, rhui_info, '9.6', False)
-    assert swapped['enable'] == set()
-
-
-def test_perform_client_swap_enable_only_without_copies(monkeypatch):
-    swapped = {}
-    monkeypatch.setattr(tus_rhui, '_run_preinstall_tasks', lambda c, t: None)
-
-    def _no_parse(f):
-        raise AssertionError('_parse_repoids_from_copied_files must not run without preinstall copies')
-
-    monkeypatch.setattr(tus_rhui, '_parse_repoids_from_copied_files', _no_parse)
-
-    def _fake_swap(c, info, ver, skip, enable):
-        swapped['enable'] = enable
-
-    monkeypatch.setattr(tus_rhui, '_swap_clients', _fake_swap)
-    monkeypatch.setattr(tus_rhui, '_run_postinstall_tasks', lambda c, t: None)
-    monkeypatch.setattr(tus_rhui, '_find_rhui_client_files', lambda c, p, v: set())
-    monkeypatch.setattr(tus_rhui, '_remove_nonclient_injected_files', lambda c, info, cf: None)
-    ctx = MockContext()
-    rhui_info = make_rhui_info(bootstrap=True, enable_only=True, preinstall_copies=[])
+    rhui_info = make_rhui_info(bootstrap=True, enable_only=enable_only, preinstall_copies=preinstall_copies)
     tus_rhui.perform_client_swap(ctx, rhui_info, '9.6', False)
     assert swapped['enable'] == set()
 
