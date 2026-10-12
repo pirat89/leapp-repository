@@ -34,6 +34,15 @@ from leapp.libraries.actor import tus_constants
                 '--releasever', '10.0',
             ],
         ),
+        (
+            '11',
+            False,
+            [
+                '--setopt=module_platform_id=platform:el11',
+                '--setopt=keepcache=1',
+                '--releasever', '11',
+            ],
+        ),
     ]
 )
 def test_common_dnf_flags(target_version, skip_rhsm, expected):

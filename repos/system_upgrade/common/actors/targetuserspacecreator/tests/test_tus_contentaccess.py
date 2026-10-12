@@ -1,3 +1,5 @@
+from unittest import mock
+
 import pytest
 
 from leapp.exceptions import StopActorExecutionError
@@ -48,18 +50,15 @@ class MockInputData:
         self.custom_repofiles = custom_repofiles or []
 
 
-class CallSpy:
-    def __init__(self):
-        self.calls = []
-
-    def __call__(self, *args, **kwargs):
-        self.calls.append((args, kwargs))
-
-
-def test_adjust_dnf_stream_variable_writes():
+@pytest.mark.parametrize(('version', 'exp_str'), (
+    ('9', '9-stream\n'),
+    ('10', '10-stream\n'),
+))
+@pytest.mark.parametrize('fpath', ('/etc/dnf/vars/stream', '/foo/bar/fname'))
+def test_adjust_dnf_stream_variable_writes(version, exp_str, fpath):
     context = MockContext()
-    tus_contentaccess._adjust_dnf_stream_variable(context, '9', varfile='/etc/dnf/vars/stream')
-    assert context.written_files == {'/etc/dnf/vars/stream': '9-stream\n'}
+    tus_contentaccess._adjust_dnf_stream_variable(context, version, varfile=fpath)
+    assert context.written_files == {fpath: exp_str}
 
 
 @pytest.mark.parametrize('error', [OSError('disk error'), FileNotFoundError('missing')])
@@ -98,9 +97,9 @@ def _setup_establish(monkeypatch, distro_id, swap_spy, set_container_spy, switch
 
 def test_establish_centos_with_rhui(monkeypatch):
     context = MockContext()
-    swap_spy = CallSpy()
-    set_container_spy = CallSpy()
-    switch_cert_spy = CallSpy()
+    swap_spy = mock.Mock()
+    set_container_spy = mock.Mock()
+    switch_cert_spy = mock.Mock()
     _setup_establish(monkeypatch, 'centos', swap_spy, set_container_spy, switch_cert_spy)
 
     rhui_info = object()
@@ -111,36 +110,36 @@ def test_establish_centos_with_rhui(monkeypatch):
 
     tus_contentaccess.establish(context, inputs)
 
-    assert swap_spy.calls == [((context, rhui_info, '9.6', True), {})]
-    assert switch_cert_spy.calls == [((context, rhsm_info), {})]
-    assert len(set_container_spy.calls) == 1
+    swap_spy.assert_called_once_with(context, rhui_info, '9.6', True)
+    switch_cert_spy.assert_called_once_with(context, rhsm_info)
+    set_container_spy.assert_called_once_with(context)
     assert context.written_files == {'/etc/dnf/vars/stream': '9-stream\n'}
     assert context.copied == [('/tmp/custom.repo', '/etc/yum.repos.d/custom.repo')]
 
 
 def test_establish_rhel_no_rhui(monkeypatch):
     context = MockContext()
-    swap_spy = CallSpy()
-    set_container_spy = CallSpy()
-    switch_cert_spy = CallSpy()
+    swap_spy = mock.Mock()
+    set_container_spy = mock.Mock()
+    switch_cert_spy = mock.Mock()
     _setup_establish(monkeypatch, 'rhel', swap_spy, set_container_spy, switch_cert_spy, target_major='8')
 
     inputs = MockInputData(rhui_info=None, skip_rhsm=False, rhsm_info=object(), custom_repofiles=[])
 
     tus_contentaccess.establish(context, inputs)
 
-    assert not swap_spy.calls
-    assert len(set_container_spy.calls) == 1
-    assert len(switch_cert_spy.calls) == 1
+    swap_spy.assert_not_called()
+    set_container_spy.assert_called_once_with(context)
+    switch_cert_spy.assert_called_once_with(context, inputs.rhsm_info)
     assert not context.written_files
     assert not context.copied
 
 
 def test_establish_rhel_with_rhui_no_stream(monkeypatch):
     context = MockContext()
-    swap_spy = CallSpy()
-    set_container_spy = CallSpy()
-    switch_cert_spy = CallSpy()
+    swap_spy = mock.Mock()
+    set_container_spy = mock.Mock()
+    switch_cert_spy = mock.Mock()
     _setup_establish(monkeypatch, 'rhel', swap_spy, set_container_spy, switch_cert_spy)
 
     rhui_info = object()
@@ -148,5 +147,5 @@ def test_establish_rhel_with_rhui_no_stream(monkeypatch):
 
     tus_contentaccess.establish(context, inputs)
 
-    assert swap_spy.calls == [((context, rhui_info, '9.6', False), {})]
+    swap_spy.assert_called_once_with(context, rhui_info, '9.6', False)
     assert not context.written_files

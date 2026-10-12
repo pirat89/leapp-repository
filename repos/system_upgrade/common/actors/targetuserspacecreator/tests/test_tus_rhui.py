@@ -229,12 +229,12 @@ def test_repofiles_copied_at_setup(monkeypatch):
 
 
 def test_dnf_repolist_repoids():
-    stdout = (
-        'Repo-id : rhel-9-baseos\n'
-        'Repo-name : BaseOS\n'
-        'Repo-id : rhel-9-appstream\n'
-        'some other line\n'
-    )
+    stdout = [
+        'Repo-id : rhel-9-baseos',
+        'Repo-name : BaseOS',
+        'Repo-id : rhel-9-appstream',
+        'some other line',
+    ]
     ctx = MockContext(call_result={'stdout': stdout})
     result = tus_rhui._dnf_repolist_repoids(ctx, '9.6')
     assert result == {'rhel-9-baseos', 'rhel-9-appstream'}
