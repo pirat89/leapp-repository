@@ -119,10 +119,8 @@ def _target_major():
 )
 def test_compute_layout(monkeypatch, override, container_root):
     get_env = MockGetEnv(override=override)
-    free_space = MockGetRecommendedFreeSpace(_SENTINEL_RESERVE)
     monkeypatch.setattr(tus_layout, 'get_env', get_env)
     monkeypatch.setattr(tus_layout, 'get_target_major_version', _target_major)
-    monkeypatch.setattr(tus_layout.overlaygen, 'get_recommended_leapp_free_space', free_space)
 
     layout = tus_layout.compute()
 
@@ -133,7 +131,6 @@ def test_compute_layout(monkeypatch, override, container_root):
     assert layout.mounts_dir == os.path.join(container_root, 'scratch', 'mounts')
     assert layout.installroot_overlay_mountpoint == '/el9target'
     assert layout.persistent_pkg_cache_path == os.path.join(container_root, 'persistent_package_cache')
-    assert layout.scratch_reserve == _SENTINEL_RESERVE
     assert free_space.called_with == [layout.userspace_path]
 
 
@@ -141,8 +138,10 @@ def test_scratch_container(monkeypatch):
     scratch = MockScratch()
     overlay = MockOverlay(scratch)
     create_overlay = MockCreateSourceOverlay(overlay)
+    free_space = MockGetRecommendedFreeSpace(_SENTINEL_RESERVE)
     mount_iso = MockMountIso()
     monkeypatch.setattr(tus_layout.overlaygen, 'create_source_overlay', create_overlay)
+    monkeypatch.setattr(tus_layout.overlaygen, 'get_recommended_leapp_free_space', free_space)
     monkeypatch.setattr(tus_layout.mounting, 'mount_upgrade_iso_to_root_dir', mount_iso)
 
     layout = tus_layout.Layout(
@@ -152,7 +151,6 @@ def test_scratch_container(monkeypatch):
         mounts_dir='/var/lib/leapp/scratch/mounts',
         installroot_overlay_mountpoint='/el9target',
         persistent_pkg_cache_path='/var/lib/leapp/persistent_package_cache',
-        scratch_reserve=1234,
     )
     inputs = MockInputData(storage_info='STORAGE_INFO', target_iso='TARGET_ISO')
 
@@ -171,7 +169,7 @@ def test_scratch_container(monkeypatch):
         'scratch_dir': '/var/lib/leapp/scratch',
         'xfs_info': None,
         'storage_info': 'STORAGE_INFO',
-        'scratch_reserve': 1234,
+        'scratch_reserve': _SENTINEL_RESERVE,
     }
     assert mount_iso.called_with == ('OVERLAY_TARGET', 'TARGET_ISO')
     assert mount_iso.exited is True
