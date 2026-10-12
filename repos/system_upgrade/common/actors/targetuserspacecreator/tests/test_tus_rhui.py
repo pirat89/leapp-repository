@@ -15,15 +15,6 @@ from leapp.models import CopyFile, RHUIInfo, TargetRHUIPostInstallTasks, TargetR
 _SWAP_SCRIPT_PATH = '/leapp-rhui-swap.dnfsh'
 
 
-class logger_with_critical(logger_mocked):
-    def __init__(self):
-        super().__init__()
-        self.critmsg = []
-
-    def critical(self, *args, **kwargs):
-        self.critmsg.extend(args)
-
-
 class MockRepofileEntry:
     def __init__(self, repoid):
         self.repoid = repoid
@@ -323,7 +314,7 @@ def test_find_rhui_client_files():
 
 
 def test_find_rhui_client_files_error(monkeypatch):
-    monkeypatch.setattr(api, 'current_logger', logger_with_critical())
+    monkeypatch.setattr(api, 'current_logger', logger_mocked())
     ctx = MockContext(raise_on_call=make_cpe())
     with pytest.raises(StopActorExecutionError):
         tus_rhui._find_rhui_client_files(ctx, ['c'], '9')
