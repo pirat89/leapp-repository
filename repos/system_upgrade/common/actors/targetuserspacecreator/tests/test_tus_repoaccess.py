@@ -1098,5 +1098,3 @@ def test_copy_decouple(monkeypatch, temp_directory_layout, initial_structure, ex
 
         # Then re-raise the assertion
         raise
-
-

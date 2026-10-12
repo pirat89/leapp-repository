@@ -37,7 +37,10 @@ def test_adjust_dnf_stream_variable_error(error):
 
 def test_install_custom_repofiles():
     context = MockContext()
-    repofiles = [CustomTargetRepositoryFile(file='/home/user/a.repo'), CustomTargetRepositoryFile(file='/tmp/sub/b.repo')]
+    repofiles = [
+        CustomTargetRepositoryFile(file='/home/user/a.repo'),
+        CustomTargetRepositoryFile(file='/tmp/sub/b.repo')
+    ]
     tus_contentaccess._install_custom_repofiles(context, repofiles)
     assert context.copy_to_calls == [
         ('/home/user/a.repo', '/etc/yum.repos.d/a.repo'),
