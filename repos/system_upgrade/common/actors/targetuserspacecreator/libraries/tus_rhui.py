@@ -27,7 +27,7 @@ _YUM_REPOS_D = '/etc/yum.repos.d'
 
 def _copy_file_dst(copy_file):
     """Return the intended destination for a CopyFile (dst may be null → src)."""
-    # TODO(pstodulk): peform the action in data input loading??
+    # TODO(pstodulk): perform the action in data input loading??
     return copy_file.dst if copy_file.dst else copy_file.src
 
 
@@ -103,9 +103,9 @@ def _run_postinstall_tasks(context_scratch, postinstall_tasks):
             .format(src, dst)
         )
         context_scratch.makedirs(os.path.dirname(dst), exists_ok=True)
-        # NOTE: Note the use of CP instead of `copy_to` function is esential
+        # NOTE: Note the use of CP instead of `copy_to` function is essential
         # as this action is designed to be performed inside the scratch
-        # container context - so all paths are ment to be valid inside the container.
+        # container context - so all paths are meant to be valid inside the container.
         # See the TargetRHUIPostInstallTasks model.
         context_scratch.call(['cp', src, dst])
 
