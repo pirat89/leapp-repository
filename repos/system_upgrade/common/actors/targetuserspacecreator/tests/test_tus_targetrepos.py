@@ -1,4 +1,5 @@
 import pytest
+from test_tus_mock_utils import MockInputData
 
 from leapp.exceptions import StopActorExecution, StopActorExecutionError
 from leapp.libraries.actor import tus_targetrepos
@@ -19,13 +20,6 @@ from leapp.models import (
 
 class MockContext:
     """Opaque context sentinel - all context consumers are monkeypatched."""
-
-
-class MockInputData:
-    def __init__(self, target_repositories, rhui_info=None, skip_rhsm=False):
-        self.target_repositories = target_repositories
-        self.rhui_info = rhui_info
-        self.skip_rhsm = skip_rhsm
 
 
 class MockRepoListHolder:

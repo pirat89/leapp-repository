@@ -1,58 +1,15 @@
 import os
 
 import pytest
+from test_tus_mock_utils import make_cpe, MockContext, MockInputData, MockNspawnActions, RunSpy
 
 from leapp.exceptions import StopActorExecutionError
 from leapp.libraries.actor import tus_userspacebuild
 from leapp.libraries.common.testutils import CurrentActorMocked, logger_mocked
-from leapp.libraries.stdlib import api, CalledProcessError
+from leapp.libraries.stdlib import api
 from leapp.models import CopyFile, TargetUserSpaceInfo, UsedTargetRepositories, UsedTargetRepository
 
 _DEDICATED_LEAPP_PARTITION_URL = 'https://access.redhat.com/solutions/5057391'
-
-
-def _make_called_process_error(stderr='', stdout=''):
-    return CalledProcessError(
-        'Command failed.',
-        ['dnf', 'install'],
-        {'stdout': stdout, 'stderr': stderr, 'exit_code': 1}
-    )
-
-
-class RunSpy:
-    """Record every invocation of the module-level ``run`` helper."""
-
-    def __init__(self):
-        self.calls = []
-
-    def __call__(self, cmd, *args, **kwargs):
-        self.calls.append(cmd)
-        return {'stdout': '', 'stderr': ''}
-
-
-class MockContext:
-    def __init__(self, base_dir='/base'):
-        self.base_dir = base_dir
-        self.calls = []
-        self.copy_to_calls = []
-        self.copytree_to_calls = []
-        self.remove_tree_calls = []
-
-    def full_path(self, path):
-        return os.path.join(self.base_dir, path.lstrip('/'))
-
-    def call(self, cmd, *args, **kwargs):
-        self.calls.append(cmd)
-        return {'stdout': '', 'stderr': ''}
-
-    def copy_to(self, src, dst):
-        self.copy_to_calls.append((src, dst))
-
-    def copytree_to(self, src, dst):
-        self.copytree_to_calls.append((src, dst))
-
-    def remove_tree(self, dst):
-        self.remove_tree_calls.append(dst)
 
 
 class MockCM:
@@ -61,17 +18,6 @@ class MockCM:
     def __init__(self, *args, **kwargs):
         self.args = args
         self.kwargs = kwargs
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        return False
-
-
-class MockNspawnActions:
-    def __init__(self, base_dir=None):
-        self.base_dir = base_dir
 
     def __enter__(self):
         return self
@@ -91,7 +37,7 @@ class MockRepoData:
         self.enabled = enabled
 
 
-class MockRepoFile:
+class MockRepoFactsFile:
     def __init__(self, data):
         self.data = data
 
@@ -99,19 +45,6 @@ class MockRepoFile:
 class MockRepositoriesFacts:
     def __init__(self, repositories):
         self.repositories = repositories
-
-
-class MockInputs:
-    def __init__(self, pkg_manager_info=None, repositories_facts=None,
-                 skip_rhsm=False, nogpgcheck=False, packages=None,
-                 copy_files=None, rhui_info=None):
-        self.pkg_manager_info = pkg_manager_info
-        self.repositories_facts = repositories_facts
-        self.skip_rhsm = skip_rhsm
-        self.nogpgcheck = nogpgcheck
-        self.packages = packages if packages is not None else []
-        self.copy_files = copy_files if copy_files is not None else []
-        self.rhui_info = rhui_info
 
 
 class MockLayout:
@@ -273,7 +206,7 @@ def test_raise_insufficient_space_error():
         'Disk Requirements:\n'
         '  At least 200MB more space needed on the / filesystem.\n'
     )
-    err = _make_called_process_error(stderr=stderr)
+    err = make_cpe(stderr=stderr)
 
     with pytest.raises(StopActorExecutionError) as exc_info:
         tus_userspacebuild._raise_insufficient_space_error(err)
@@ -289,8 +222,8 @@ def test_diagnose_dnf_failure_insufficient_space(monkeypatch):
         'Disk Requirements:\n'
         '  At least 1GB more space needed on the / filesystem.\n'
     )
-    err = _make_called_process_error(stderr=stderr)
-    inputs = MockInputs()
+    err = make_cpe(stderr=stderr)
+    inputs = MockInputData()
 
     with pytest.raises(StopActorExecutionError) as exc_info:
         tus_userspacebuild._diagnose_dnf_failure(err, inputs)
@@ -300,8 +233,8 @@ def test_diagnose_dnf_failure_insufficient_space(monkeypatch):
 
 def test_diagnose_dnf_failure_proxy_in_pkg_manager(monkeypatch):
     monkeypatch.setattr(api, 'current_actor', CurrentActorMocked(src_distro='rhel', dst_distro='rhel'))
-    err = _make_called_process_error(stderr='some generic dnf error')
-    inputs = MockInputs(pkg_manager_info=MockPkgManagerInfo(configured_proxies=['http://proxy']))
+    err = make_cpe(stderr='some generic dnf error')
+    inputs = MockInputData(pkg_manager_info=MockPkgManagerInfo(configured_proxies=['http://proxy']))
 
     with pytest.raises(StopActorExecutionError) as exc_info:
         tus_userspacebuild._diagnose_dnf_failure(err, inputs)
@@ -313,9 +246,9 @@ def test_diagnose_dnf_failure_proxy_in_pkg_manager(monkeypatch):
 
 def test_diagnose_dnf_failure_proxy_in_repo(monkeypatch):
     monkeypatch.setattr(api, 'current_actor', CurrentActorMocked(src_distro='rhel', dst_distro='rhel'))
-    err = _make_called_process_error(stderr='some generic dnf error')
-    repo_file = MockRepoFile([MockRepoData(proxy='http://proxy', enabled=True)])
-    inputs = MockInputs(repositories_facts=MockRepositoriesFacts([repo_file]))
+    err = make_cpe(stderr='some generic dnf error')
+    repo_file = MockRepoFactsFile([MockRepoData(proxy='http://proxy', enabled=True)])
+    inputs = MockInputData(repositories_facts=MockRepositoriesFacts([repo_file]))
 
     with pytest.raises(StopActorExecutionError) as exc_info:
         tus_userspacebuild._diagnose_dnf_failure(err, inputs)
@@ -325,8 +258,8 @@ def test_diagnose_dnf_failure_proxy_in_repo(monkeypatch):
 
 def test_diagnose_dnf_failure_centos_to_rhel(monkeypatch):
     monkeypatch.setattr(api, 'current_actor', CurrentActorMocked(src_distro='centos', dst_distro='rhel'))
-    err = _make_called_process_error(stderr='some generic dnf error')
-    inputs = MockInputs()
+    err = make_cpe(stderr='some generic dnf error')
+    inputs = MockInputData()
 
     with pytest.raises(StopActorExecutionError) as exc_info:
         tus_userspacebuild._diagnose_dnf_failure(err, inputs)
@@ -395,7 +328,7 @@ def test_build_returns_target_userspace_info(monkeypatch):
     run_spy = RunSpy()
     context = MockContext()
     layout = MockLayout()
-    inputs = MockInputs(nogpgcheck=False, packages=['dnf'], copy_files=[], rhui_info=None)
+    inputs = MockInputData(nogpgcheck=False, packages=['dnf'], copy_files=[], rhui_info=None)
     used_repos = UsedTargetRepositories(repos=[UsedTargetRepository(repoid='r1')])
 
     monkeypatch.setattr(api, 'current_actor', CurrentActorMocked(dst_ver='9.6'))

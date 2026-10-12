@@ -1,19 +1,12 @@
 import os
 
 import pytest
+from test_tus_mock_utils import make_cpe, MockNspawnActions, RunSpy
 
 from leapp.libraries.actor import tus_repoaccess
 from leapp.libraries.actor.tus_repoaccess import BrokenSymlinkError
 from leapp.libraries.common.testutils import logger_mocked
-from leapp.libraries.stdlib import api, CalledProcessError
-
-
-def _make_cpe():
-    return CalledProcessError(
-        'Command failed',
-        ['rpm', '-qf', 'somefile'],
-        {'stdout': '', 'stderr': 'error', 'exit_code': 1}
-    )
+from leapp.libraries.stdlib import api
 
 
 class MockContext:
@@ -39,35 +32,12 @@ class MockContext:
         if cmd[:2] == ['rpm', '-qf']:
             queried = cmd[2]
             if queried not in self.rpm_owners:
-                raise _make_cpe()
+                raise make_cpe()
             return {'stdout': self.rpm_owners[queried]}
         return {'stdout': ''}
 
     def copytree_from(self, src, dst):
         self.copytree_from_calls.append((src, dst))
-
-
-class RunSpy:
-    """Records all calls to the module-level run() helper."""
-
-    def __init__(self):
-        self.calls = []
-
-    def __call__(self, cmd, *args, **kwargs):
-        self.calls.append(cmd)
-
-
-class MockNspawnActions:
-    """Context-manager replacement for mounting.NspawnActions."""
-
-    def __init__(self, base_dir=None):
-        self.base_dir = base_dir
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *args):
-        return False
 
 
 # ---------------------------------------------------------------------------

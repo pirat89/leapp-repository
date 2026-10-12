@@ -1,6 +1,7 @@
 import os
 
 import pytest
+from test_tus_mock_utils import MockInputData
 
 from leapp.libraries.actor import tus_layout
 
@@ -105,14 +106,6 @@ class MockMountIso:
         return False
 
 
-class MockInputs:
-    """Minimal stand-in for the InputData value object."""
-
-    def __init__(self, storage_info, target_iso):
-        self.storage_info = storage_info
-        self.target_iso = target_iso
-
-
 def _target_major():
     return '9'
 
@@ -161,7 +154,7 @@ def test_scratch_container(monkeypatch):
         persistent_pkg_cache_path='/var/lib/leapp/persistent_package_cache',
         scratch_reserve=1234,
     )
-    inputs = MockInputs(storage_info='STORAGE_INFO', target_iso='TARGET_ISO')
+    inputs = MockInputData(storage_info='STORAGE_INFO', target_iso='TARGET_ISO')
 
     with tus_layout.scratch_container(layout, inputs) as yielded:
         assert yielded is scratch

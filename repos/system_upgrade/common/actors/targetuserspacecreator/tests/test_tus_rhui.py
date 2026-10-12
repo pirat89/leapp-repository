@@ -3,66 +3,16 @@
 import os
 
 import pytest
+from test_tus_mock_utils import make_cpe, MockContext
 
 from leapp.exceptions import StopActorExecutionError
 from leapp.libraries.actor import tus_constants, tus_rhui
 from leapp.libraries.common import repofileutils
 from leapp.libraries.common.testutils import logger_mocked
-from leapp.libraries.stdlib import api, CalledProcessError
+from leapp.libraries.stdlib import api
 from leapp.models import CopyFile, RHUIInfo, TargetRHUIPostInstallTasks, TargetRHUIPreInstallTasks, TargetRHUISetupInfo
 
 _SWAP_SCRIPT_PATH = '/leapp-rhui-swap.dnfsh'
-
-
-class _MockOpen:
-    def __init__(self, ctx, path, mode):
-        self.ctx = ctx
-        self.path = path
-        self.mode = mode
-        self._chunks = []
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *args):
-        self.ctx.written[self.path] = ''.join(self._chunks)
-        return False
-
-    def write(self, data):
-        self._chunks.append(data)
-
-
-class MockContext:
-    def __init__(self, base_dir='/scratch', call_result=None, raise_on_call=None):
-        self.base_dir = base_dir
-        self.call_result = call_result
-        self.raise_on_call = raise_on_call
-        self.calls = []
-        self.removed = []
-        self.copied = []
-        self.makedirs_calls = []
-        self.written = {}
-
-    def full_path(self, path):
-        return os.path.join(self.base_dir, path.lstrip('/'))
-
-    def call(self, cmd, split=False, callback_raw=None):
-        self.calls.append(cmd)
-        if self.raise_on_call:
-            raise self.raise_on_call
-        return self.call_result
-
-    def remove(self, path):
-        self.removed.append(path)
-
-    def copy_to(self, src, dst):
-        self.copied.append((src, dst))
-
-    def makedirs(self, path, exists_ok=False):
-        self.makedirs_calls.append((path, exists_ok))
-
-    def open(self, path, mode):
-        return _MockOpen(self, path, mode)
 
 
 class logger_with_critical(logger_mocked):
@@ -82,14 +32,6 @@ class MockRepofileEntry:
 class MockRepofileContents:
     def __init__(self, data):
         self.data = data
-
-
-def _make_cpe(stderr='some error'):
-    return CalledProcessError(
-        'Command failed',
-        ['some', 'cmd'],
-        {'stdout': 'out', 'stderr': stderr, 'exit_code': 1}
-    )
 
 
 def _make_setup_info(bootstrap=True, enable_only=True, preinstall_copies=None,
@@ -169,8 +111,8 @@ def test_run_preinstall_tasks_none(monkeypatch):
     monkeypatch.setattr(api, 'current_logger', logger_mocked())
     ctx = MockContext()
     tus_rhui._run_preinstall_tasks(ctx, None)
-    assert not ctx.removed
-    assert not ctx.copied
+    assert not ctx.remove_calls
+    assert not ctx.copy_to_calls
 
 
 def test_run_preinstall_tasks_full(monkeypatch):
@@ -182,8 +124,8 @@ def test_run_preinstall_tasks_full(monkeypatch):
         files_to_copy_into_overlay=[CopyFile(src='/h/a.repo', dst='/etc/a.repo')],
     )
     tus_rhui._run_preinstall_tasks(ctx, tasks)
-    assert ctx.removed == ['/old1', '/old2']
-    assert ctx.copied == [('/h/a.repo', '/etc/a.repo')]
+    assert ctx.remove_calls == ['/old1', '/old2']
+    assert ctx.copy_to_calls == [('/h/a.repo', '/etc/a.repo')]
     assert ctx.makedirs_calls == [('/etc', True)]
 
 
@@ -286,7 +228,7 @@ def test_discover_client_exposed_repoids_failure_reverts(monkeypatch):
     monkeypatch.setattr(tus_rhui, '_repofiles_copied_at_setup', lambda c, f: set())
 
     def _boom(c, v):
-        raise _make_cpe('repolist failed')
+        raise make_cpe(stderr='repolist failed')
 
     monkeypatch.setattr(tus_rhui, '_dnf_repolist_repoids', _boom)
     rhui_info = _make_rhui_info(bootstrap=True)
@@ -323,19 +265,19 @@ def test_swap_clients_success():
     ctx = MockContext()
     rhui_info = _make_rhui_info(src_pkgs=['old-client'], target_pkgs=['new-client'])
     tus_rhui._swap_clients(ctx, rhui_info, '9.6', False, set())
-    assert ctx.written[_SWAP_SCRIPT_PATH] == 'remove old-client\ninstall new-client\ntransaction run\n'
+    assert ctx.written_files[_SWAP_SCRIPT_PATH] == 'remove old-client\ninstall new-client\ntransaction run\n'
     expected_cmd = ['dnf', 'shell', '-y']
     expected_cmd += tus_constants.common_dnf_flags('9.6', False)
     expected_cmd.append(_SWAP_SCRIPT_PATH)
     assert ctx.calls == [expected_cmd]
-    assert ctx.removed == [_SWAP_SCRIPT_PATH]
+    assert ctx.remove_calls == [_SWAP_SCRIPT_PATH]
 
 
 def test_swap_clients_enable_only_no_src():
     ctx = MockContext()
     rhui_info = _make_rhui_info(src_pkgs=[], target_pkgs=['new-client'])
     tus_rhui._swap_clients(ctx, rhui_info, '9.6', True, {'repoB', 'repoA'})
-    assert ctx.written[_SWAP_SCRIPT_PATH] == 'install new-client\ntransaction run\n'
+    assert ctx.written_files[_SWAP_SCRIPT_PATH] == 'install new-client\ntransaction run\n'
     expected_cmd = ['dnf', 'shell', '-y']
     expected_cmd += tus_constants.common_dnf_flags('9.6', True)
     expected_cmd.append('--disablerepo=*')
@@ -346,11 +288,11 @@ def test_swap_clients_enable_only_no_src():
 
 
 def test_swap_clients_failure_removes_script():
-    ctx = MockContext(raise_on_call=_make_cpe('swap failed'))
+    ctx = MockContext(raise_on_call=make_cpe(stderr='swap failed'))
     rhui_info = _make_rhui_info(src_pkgs=['old'], target_pkgs=['new'])
     with pytest.raises(StopActorExecutionError):
         tus_rhui._swap_clients(ctx, rhui_info, '9.6', False, set())
-    assert ctx.removed == [_SWAP_SCRIPT_PATH]
+    assert ctx.remove_calls == [_SWAP_SCRIPT_PATH]
 
 
 def test_query_rpm_for_pkg_files():
@@ -370,7 +312,7 @@ def test_find_rhui_client_repofiles():
 
 
 def test_find_rhui_client_repofiles_error():
-    ctx = MockContext(raise_on_call=_make_cpe())
+    ctx = MockContext(raise_on_call=make_cpe())
     with pytest.raises(StopActorExecutionError):
         tus_rhui._find_rhui_client_repofiles(ctx, ['client'], '9')
 
@@ -382,7 +324,7 @@ def test_find_rhui_client_files():
 
 def test_find_rhui_client_files_error(monkeypatch):
     monkeypatch.setattr(api, 'current_logger', logger_with_critical())
-    ctx = MockContext(raise_on_call=_make_cpe())
+    ctx = MockContext(raise_on_call=make_cpe())
     with pytest.raises(StopActorExecutionError):
         tus_rhui._find_rhui_client_files(ctx, ['c'], '9')
 
@@ -397,7 +339,7 @@ def test_remove_nonclient_injected_files(monkeypatch):
     ]
     rhui_info = _make_rhui_info(preinstall_copies=copies, supporting=['/h/support.cfg'])
     tus_rhui._remove_nonclient_injected_files(ctx, rhui_info, {'/etc/client.repo'})
-    assert ctx.removed == ['/etc/junk.repo']
+    assert ctx.remove_calls == ['/etc/junk.repo']
 
 
 def test_perform_client_swap_no_rhui():
@@ -464,7 +406,7 @@ def test_perform_client_swap_no_enable_only(monkeypatch):
 def test_cleanup_injected_repofiles_no_rhui():
     ctx = MockContext()
     tus_rhui.cleanup_injected_repofiles(ctx, None)
-    assert not ctx.removed
+    assert not ctx.remove_calls
 
 
 def test_cleanup_injected_repofiles(monkeypatch):
@@ -476,7 +418,7 @@ def test_cleanup_injected_repofiles(monkeypatch):
     def _fake_call(cmd, split=False, callback_raw=None):
         ctx.calls.append(cmd)
         if cmd == ['rpm', '-qf', '/etc/b.repo']:
-            raise _make_cpe()
+            raise make_cpe()
         return {'stdout': 'pkg'}
 
     ctx.call = _fake_call
@@ -487,4 +429,4 @@ def test_cleanup_injected_repofiles(monkeypatch):
     ]
     rhui_info = _make_rhui_info(preinstall_copies=copies)
     tus_rhui.cleanup_injected_repofiles(ctx, rhui_info)
-    assert ctx.removed == ['/etc/b.repo']
+    assert ctx.remove_calls == ['/etc/b.repo']

@@ -1,3 +1,5 @@
+from unittest import mock
+
 import pytest
 
 from leapp import reporting
@@ -12,21 +14,6 @@ from leapp.libraries.actor import (
 from leapp.libraries.common import rhsm
 from leapp.libraries.common.testutils import create_report_mocked, produce_mocked
 from leapp.libraries.stdlib import api
-
-
-class _Recorder:
-    """Callable spy recording calls and returning a preset value (or raising)."""
-
-    def __init__(self, return_value=None, raises=None):
-        self.return_value = return_value
-        self.raises = raises
-        self.calls = []
-
-    def __call__(self, *args, **kwargs):
-        self.calls.append((args, kwargs))
-        if self.raises is not None:
-            raise self.raises
-        return self.return_value
 
 
 class _MockScratchContainer:
@@ -61,7 +48,7 @@ class _MockScratchContainer:
 def test_report_missing_target_cert(monkeypatch, product_type, beta_expected):
     created_report = create_report_mocked()
     monkeypatch.setattr(tus_userspacegen.reporting, 'create_report', created_report)
-    monkeypatch.setattr(tus_userspacegen, 'get_product_type', _Recorder(product_type))
+    monkeypatch.setattr(tus_userspacegen, 'get_product_type', mock.Mock(return_value=product_type))
 
     tus_userspacegen._report_missing_target_cert()
 
@@ -84,13 +71,13 @@ def test_perform_happy_path(monkeypatch):
     userspace_info = object()
     snapshot = object()
 
-    gather = _Recorder(inputs)
-    compute = _Recorder(layout)
+    gather = mock.Mock(return_value=inputs)
+    compute = mock.Mock(return_value=layout)
     scratch_container = _MockScratchContainer(scratch)
-    establish = _Recorder()
-    select = _Recorder(used_repos)
-    build = _Recorder(userspace_info)
-    build_snapshot = _Recorder(snapshot)
+    establish = mock.Mock()
+    select = mock.Mock(return_value=used_repos)
+    build = mock.Mock(return_value=userspace_info)
+    build_snapshot = mock.Mock(return_value=snapshot)
     produce = produce_mocked()
 
     monkeypatch.setattr(tus_inputdata, 'gather', gather)
@@ -107,10 +94,10 @@ def test_perform_happy_path(monkeypatch):
     assert scratch_container.call_args == (layout, inputs)
     assert scratch_container.entered
     assert scratch_container.exited
-    assert establish.calls == [((scratch, inputs), {})]
-    assert select.calls == [((scratch, inputs), {})]
-    assert build.calls == [((scratch, layout, inputs, used_repos), {})]
-    assert build_snapshot.calls == [((scratch,), {})]
+    establish.assert_called_once_with(scratch, inputs)
+    select.assert_called_once_with(scratch, inputs)
+    build.assert_called_once_with(scratch, layout, inputs, used_repos)
+    build_snapshot.assert_called_once_with(scratch)
     assert produce.called == 3
     assert produce.model_instances == [userspace_info, used_repos, snapshot]
 
@@ -119,14 +106,14 @@ def test_perform_missing_target_cert_soft_stops(monkeypatch):
     scratch = object()
 
     inputs = object()
-    gather = _Recorder(inputs)
-    compute = _Recorder(object())
+    gather = mock.Mock(return_value=inputs)
+    compute = mock.Mock(return_value=object())
     scratch_container = _MockScratchContainer(scratch)
-    establish = _Recorder(raises=rhsm.MissingTargetProductCertificate('missing cert'))
-    select = _Recorder()
-    build = _Recorder()
-    build_snapshot = _Recorder()
-    report_spy = _Recorder()
+    establish = mock.Mock(side_effect=rhsm.MissingTargetProductCertificate('missing cert'))
+    select = mock.Mock()
+    build = mock.Mock()
+    build_snapshot = mock.Mock()
+    report_spy = mock.Mock()
     produce = produce_mocked()
 
     monkeypatch.setattr(tus_inputdata, 'gather', gather)
@@ -144,9 +131,9 @@ def test_perform_missing_target_cert_soft_stops(monkeypatch):
     assert result is None
     assert scratch_container.entered
     assert scratch_container.exited
-    assert establish.calls == [((scratch, inputs), {})]
-    assert report_spy.calls == [((), {})]
-    assert not select.calls
-    assert not build.calls
-    assert not build_snapshot.calls
+    establish.assert_called_once_with(scratch, inputs)
+    report_spy.assert_called_once_with()
+    select.assert_not_called()
+    build.assert_not_called()
+    build_snapshot.assert_not_called()
     assert produce.called == 0
