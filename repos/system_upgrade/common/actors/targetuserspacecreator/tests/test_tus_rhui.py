@@ -214,8 +214,8 @@ def test_discover_client_exposed_repoids_success(monkeypatch):
     rhui_info = _make_rhui_info(bootstrap=True)
     result = tus_rhui.discover_client_exposed_repoids(ctx, rhui_info, '9.6')
     assert result == {'repoA'}
-    assert ('/etc/yum.repos.d/foreign.repo', '/etc/yum.repos.d/foreign.repo.path') in renames
-    assert ('/etc/yum.repos.d/foreign.repo.path', '/etc/yum.repos.d/foreign.repo') in renames
+    assert ('/etc/yum.repos.d/foreign.repo', '/etc/yum.repos.d/foreign.repo.back') in renames
+    assert ('/etc/yum.repos.d/foreign.repo.back', '/etc/yum.repos.d/foreign.repo') in renames
 
 
 def test_discover_client_exposed_repoids_failure_reverts(monkeypatch):
@@ -234,7 +234,7 @@ def test_discover_client_exposed_repoids_failure_reverts(monkeypatch):
     rhui_info = _make_rhui_info(bootstrap=True)
     with pytest.raises(StopActorExecutionError):
         tus_rhui.discover_client_exposed_repoids(ctx, rhui_info, '9.6')
-    assert ('/etc/yum.repos.d/foreign.repo.path', '/etc/yum.repos.d/foreign.repo') in renames
+    assert ('/etc/yum.repos.d/foreign.repo.back', '/etc/yum.repos.d/foreign.repo') in renames
 
 
 def test_parse_repoids_from_copied_files(monkeypatch):
