@@ -153,7 +153,6 @@ def test_scratch_container(monkeypatch):
     )
     inputs = MockInputData(storage_info='STORAGE_INFO', target_iso='TARGET_ISO')
 
-    assert free_space.called_with == [layout.userspace_path]
     with tus_layout.scratch_container(layout, inputs) as yielded:
         assert yielded is scratch
         assert overlay.entered is True
@@ -164,6 +163,7 @@ def test_scratch_container(monkeypatch):
         assert scratch.exited is False
         assert mount_iso.exited is False
 
+    assert free_space.called_with == [layout.userspace_path]
     assert create_overlay.kwargs == {
         'mounts_dir': '/var/lib/leapp/scratch/mounts',
         'scratch_dir': '/var/lib/leapp/scratch',
