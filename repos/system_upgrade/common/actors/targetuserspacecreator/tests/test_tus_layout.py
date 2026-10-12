@@ -1,37 +1,14 @@
 import os
+from unittest import mock
 
 import pytest
 from test_tus_mock_utils import MockInputData
 
 from leapp.libraries.actor import tus_layout
+from leapp.libraries.common.testutils import CurrentActorMocked
+from leapp.libraries.stdlib import api
 
 _SENTINEL_RESERVE = 4242
-
-
-class MockGetEnv:
-    """Mock for get_env honoring an optional override for LEAPP_CONTAINER_ROOT."""
-
-    def __init__(self, override=None):
-        self.override = override
-        self.calls = []
-
-    def __call__(self, name, default=None):
-        self.calls.append((name, default))
-        if self.override is not None:
-            return self.override
-        return default
-
-
-class MockGetRecommendedFreeSpace:
-    """Mock for overlaygen.get_recommended_leapp_free_space."""
-
-    def __init__(self, reserve):
-        self.reserve = reserve
-        self.called_with = []
-
-    def __call__(self, userspace_path):
-        self.called_with.append(userspace_path)
-        return self.reserve
 
 
 class MockScratch:
@@ -110,26 +87,26 @@ def _target_major():
     return '9'
 
 
-@pytest.mark.parametrize(
-    ('override', 'container_root'),
-    [
-        (None, '/var/lib/leapp'),
-        ('/custom/root', '/custom/root'),
-    ]
-)
-def test_compute_layout(monkeypatch, override, container_root):
-    get_env = MockGetEnv(override=override)
-    monkeypatch.setattr(tus_layout, 'get_env', get_env)
-    monkeypatch.setattr(tus_layout, 'get_target_major_version', _target_major)
+@pytest.mark.parametrize(('dst_ver', 'dst_maj_ver', 'container_root'), (
+    ('9.6', '9', None),
+    ('9.6', '9','/foo/path/'),
+    ('10', '10', None),
+
+))
+def test_compute_layout(monkeypatch, dst_ver, dst_maj_ver, container_root):
+    envars = {'LEAPP_CONTAINER_ROOT': container_root} if container_root else None
+    if not container_root:
+        container_root = tus_layout._DEFAULT_CONTAINER_ROOT
+    mocked_actor = CurrentActorMocked(dst_ver=dst_ver, envars=envars)
+    monkeypatch.setattr(api, 'current_actor', mocked_actor)
 
     layout = tus_layout.compute()
 
-    assert get_env.calls == [('LEAPP_CONTAINER_ROOT', '/var/lib/leapp')]
     assert layout.container_root == container_root
-    assert layout.userspace_path == os.path.join(container_root, 'el9userspace')
+    assert layout.userspace_path == os.path.join(container_root, f'el{dst_maj_ver}userspace')
     assert layout.scratch_dir == os.path.join(container_root, 'scratch')
     assert layout.mounts_dir == os.path.join(container_root, 'scratch', 'mounts')
-    assert layout.installroot_overlay_mountpoint == '/el9target'
+    assert layout.installroot_overlay_mountpoint == f'/el{dst_maj_ver}target'
     assert layout.persistent_pkg_cache_path == os.path.join(container_root, 'persistent_package_cache')
 
 
@@ -137,7 +114,7 @@ def test_scratch_container(monkeypatch):
     scratch = MockScratch()
     overlay = MockOverlay(scratch)
     create_overlay = MockCreateSourceOverlay(overlay)
-    free_space = MockGetRecommendedFreeSpace(_SENTINEL_RESERVE)
+    free_space = mock.Mock(return_value=_SENTINEL_RESERVE)
     mount_iso = MockMountIso()
     monkeypatch.setattr(tus_layout.overlaygen, 'create_source_overlay', create_overlay)
     monkeypatch.setattr(tus_layout.overlaygen, 'get_recommended_leapp_free_space', free_space)
@@ -163,7 +140,7 @@ def test_scratch_container(monkeypatch):
         assert scratch.exited is False
         assert mount_iso.exited is False
 
-    assert free_space.called_with == [layout.userspace_path]
+    free_space.assert_called_once_with(layout.userspace_path)
     assert create_overlay.kwargs == {
         'mounts_dir': '/var/lib/leapp/scratch/mounts',
         'scratch_dir': '/var/lib/leapp/scratch',
