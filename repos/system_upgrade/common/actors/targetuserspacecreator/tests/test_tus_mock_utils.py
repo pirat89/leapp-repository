@@ -108,17 +108,17 @@ class MockInputData:  # pylint: disable=too-many-arguments
                  nogpgcheck=False, packages=None, copy_files=None):
         self.target_repositories = target_repositories
         self.storage_info = storage_info
-        self.custom_repofiles = custom_repofiles if custom_repofiles is not None else []
         self.rhsm_info = rhsm_info
         self.rhui_info = rhui_info
         self.target_iso = target_iso
-        self.preupgrade_tasks = preupgrade_tasks
         self.repositories_facts = repositories_facts
         self.pkg_manager_info = pkg_manager_info
         self.skip_rhsm = skip_rhsm
         self.nogpgcheck = nogpgcheck
-        self.packages = packages if packages is not None else []
-        self.copy_files = copy_files if copy_files is not None else []
+        self.custom_repofiles = custom_repofiles or []
+        self.preupgrade_tasks = preupgrade_tasks or []
+        self.copy_files = copy_files or []
+        self.packages = packages or set()
 
 
 class RunSpy:
