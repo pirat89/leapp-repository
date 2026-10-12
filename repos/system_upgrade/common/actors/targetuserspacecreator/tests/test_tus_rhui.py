@@ -10,19 +10,17 @@ from leapp.libraries.actor import tus_constants, tus_rhui
 from leapp.libraries.common import repofileutils
 from leapp.libraries.common.testutils import logger_mocked
 from leapp.libraries.stdlib import api
-from leapp.models import CopyFile, RHUIInfo, TargetRHUIPostInstallTasks, TargetRHUIPreInstallTasks, TargetRHUISetupInfo
+from leapp.models import (
+    CopyFile,
+    RepositoryData,
+    RepositoryFile,
+    RHUIInfo,
+    TargetRHUIPostInstallTasks,
+    TargetRHUIPreInstallTasks,
+    TargetRHUISetupInfo
+)
 
 _SWAP_SCRIPT_PATH = '/leapp-rhui-swap.dnfsh'
-
-
-class MockRepofileEntry:
-    def __init__(self, repoid):
-        self.repoid = repoid
-
-
-class MockRepofileContents:
-    def __init__(self, data):
-        self.data = data
 
 
 def _make_setup_info(bootstrap=True, enable_only=True, preinstall_copies=None,
@@ -257,8 +255,13 @@ def test_discover_client_exposed_repoids_no_bootstrap(monkeypatch):
 
 def test_parse_repoids_from_copied_files(monkeypatch):
     mapping = {
-        '/h/a.repo': MockRepofileContents([MockRepofileEntry('idA'), MockRepofileEntry('idB')]),
-        '/h/b.repo': MockRepofileContents([MockRepofileEntry('idC')]),
+        '/h/a.repo': RepositoryFile(file='/h/a.repo', data=[
+            RepositoryData(repoid='idA', name='idA'),
+            RepositoryData(repoid='idB', name='idB'),
+        ]),
+        '/h/b.repo': RepositoryFile(file='/h/b.repo', data=[
+            RepositoryData(repoid='idC', name='idC'),
+        ]),
     }
     monkeypatch.setattr(tus_rhui.repofileutils, 'parse_repofile', lambda path: mapping[path])
     copy_files = [
