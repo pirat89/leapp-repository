@@ -205,8 +205,11 @@ def test_discover_client_exposed_repoids_success(monkeypatch):
     rhui_info = _make_rhui_info(bootstrap=True)
     result = tus_rhui.discover_client_exposed_repoids(ctx, rhui_info, '9.6')
     assert result == {'repoA'}
-    assert ('/etc/yum.repos.d/foreign.repo', '/etc/yum.repos.d/foreign.repo.back') in renames
-    assert ('/etc/yum.repos.d/foreign.repo.back', '/etc/yum.repos.d/foreign.repo') in renames
+    # os.rename operates on the real filesystem path (context.full_path), not the
+    # container-relative path. Only the foreign repofile is hidden and restored;
+    # the client-owned repofile is never touched.
+    assert ('/base/etc/yum.repos.d/foreign.repo', '/base/etc/yum.repos.d/foreign.repo.back') in renames
+    assert ('/base/etc/yum.repos.d/foreign.repo.back', '/base/etc/yum.repos.d/foreign.repo') in renames
 
 
 def test_discover_client_exposed_repoids_failure_reverts(monkeypatch):
@@ -225,7 +228,31 @@ def test_discover_client_exposed_repoids_failure_reverts(monkeypatch):
     rhui_info = _make_rhui_info(bootstrap=True)
     with pytest.raises(StopActorExecutionError):
         tus_rhui.discover_client_exposed_repoids(ctx, rhui_info, '9.6')
-    assert ('/etc/yum.repos.d/foreign.repo.back', '/etc/yum.repos.d/foreign.repo') in renames
+    # The finally block restores the hidden repofile even when dnf repolist fails.
+    assert ('/base/etc/yum.repos.d/foreign.repo', '/base/etc/yum.repos.d/foreign.repo.back') in renames
+    assert ('/base/etc/yum.repos.d/foreign.repo.back', '/base/etc/yum.repos.d/foreign.repo') in renames
+
+
+def test_discover_client_exposed_repoids_no_bootstrap(monkeypatch):
+    monkeypatch.setattr(api, 'current_logger', logger_mocked())
+    ctx = MockContext()
+    renames = []
+    monkeypatch.setattr(tus_rhui.os, 'rename', lambda a, b: renames.append((a, b)))
+    monkeypatch.setattr(tus_rhui, '_get_repofiles_paths', lambda c: {'/etc/yum.repos.d/client.repo'})
+
+    def _no_client_repofiles(c, p, v):
+        raise AssertionError('_find_rhui_client_repofiles must not run when not bootstrapping')
+
+    monkeypatch.setattr(tus_rhui, '_find_rhui_client_repofiles', _no_client_repofiles)
+    monkeypatch.setattr(tus_rhui, '_repofiles_copied_at_setup', lambda c, f: set())
+    monkeypatch.setattr(tus_rhui, '_dnf_repolist_repoids', lambda c, v: {'repoA'})
+    rhui_info = _make_rhui_info(bootstrap=False)
+    result = tus_rhui.discover_client_exposed_repoids(ctx, rhui_info, '9.6')
+    assert result == {'repoA'}
+    # With no client repofiles kept visible, the only existing repofile is foreign
+    # and therefore hidden before the repolist and restored afterwards.
+    assert ('/base/etc/yum.repos.d/client.repo', '/base/etc/yum.repos.d/client.repo.back') in renames
+    assert ('/base/etc/yum.repos.d/client.repo.back', '/base/etc/yum.repos.d/client.repo') in renames
 
 
 def test_parse_repoids_from_copied_files(monkeypatch):
@@ -390,6 +417,28 @@ def test_perform_client_swap_no_enable_only(monkeypatch):
     ctx = MockContext()
     copies = [CopyFile(src='/h/a.repo', dst='/etc/a.repo')]
     rhui_info = _make_rhui_info(bootstrap=True, enable_only=False, preinstall_copies=copies)
+    tus_rhui.perform_client_swap(ctx, rhui_info, '9.6', False)
+    assert swapped['enable'] == set()
+
+
+def test_perform_client_swap_enable_only_without_copies(monkeypatch):
+    swapped = {}
+    monkeypatch.setattr(tus_rhui, '_run_preinstall_tasks', lambda c, t: None)
+
+    def _no_parse(f):
+        raise AssertionError('_parse_repoids_from_copied_files must not run without preinstall copies')
+
+    monkeypatch.setattr(tus_rhui, '_parse_repoids_from_copied_files', _no_parse)
+
+    def _fake_swap(c, info, ver, skip, enable):
+        swapped['enable'] = enable
+
+    monkeypatch.setattr(tus_rhui, '_swap_clients', _fake_swap)
+    monkeypatch.setattr(tus_rhui, '_run_postinstall_tasks', lambda c, t: None)
+    monkeypatch.setattr(tus_rhui, '_find_rhui_client_files', lambda c, p, v: set())
+    monkeypatch.setattr(tus_rhui, '_remove_nonclient_injected_files', lambda c, info, cf: None)
+    ctx = MockContext()
+    rhui_info = _make_rhui_info(bootstrap=True, enable_only=True, preinstall_copies=[])
     tus_rhui.perform_client_swap(ctx, rhui_info, '9.6', False)
     assert swapped['enable'] == set()
 
