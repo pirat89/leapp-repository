@@ -93,7 +93,7 @@ def make_cpe(message='Command failed', command=None, stdout='', stderr='error', 
     )
 
 
-class MockInputData:
+class MockInputData:  # pylint: disable=too-many-arguments
     """
     Stand-in for :class:`tus_inputdata.InputData` (the actor's input value object).
 

@@ -297,7 +297,7 @@ def select_target_repositories(context, inputs):
             _inhibit_duplicate_repos(duplicates)
 
     # Inhibitor #4 - no enabled target repositories.
-    if not (selected_distro | selected_custom):
+    if not selected_distro | selected_custom:
         _inhibit_no_enabled_target_repos(get_target_version())
         raise StopActorExecution()
 
