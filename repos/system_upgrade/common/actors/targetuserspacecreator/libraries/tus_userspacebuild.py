@@ -25,12 +25,10 @@ from leapp.libraries.stdlib import api, CalledProcessError, run
 from leapp.models import TargetUserSpaceInfo
 
 _DEDICATED_LEAPP_PARTITION_URL = 'https://access.redhat.com/solutions/5057391'
-# FIXME: drop the constant
-_PERSISTENT_PACKAGE_CACHE_ENV = 'LEAPP_DEVEL_USE_PERSISTENT_PACKAGE_CACHE'
 
 
 def _persistent_cache_enabled():
-    return get_env(_PERSISTENT_PACKAGE_CACHE_ENV, '0') == '1'
+    return get_env('LEAPP_DEVEL_USE_PERSISTENT_PACKAGE_CACHE', '0') == '1'
 
 
 def _persistent_cache_pull(persistent_cache_path, installroot):
@@ -182,10 +180,6 @@ def _raise_insufficient_space_error(err):
     raise StopActorExecutionError(message=message, details=details)
 
 
-# TODO there are a lot of direct calls to get source/target distro and
-# version, I don't see better option other than passing everything as an
-# argument (lot of arguments) or just passing the IPUWorkflow config, but
-# that would bypass the functions
 def _diagnose_dnf_failure(error, inputs):
     """
     Translate a dnf ``CalledProcessError`` into a user-friendly hard stop. Always raises.

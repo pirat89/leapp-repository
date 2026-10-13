@@ -344,7 +344,6 @@ def _swap_clients(context_scratch, rhui_info, target_version, skip_rhsm, enable_
     :type enable_only_repoids: set[str]
     :raises StopActorExecutionError: When the ``dnf shell`` transaction fails.
     """
-    # FIXME: reduce amount of params
     script_lines = []
     if rhui_info.src_client_pkg_names:
         script_lines.append('remove {}'.format(' '.join(rhui_info.src_client_pkg_names)))
@@ -367,7 +366,6 @@ def _swap_clients(context_scratch, rhui_info, target_version, skip_rhsm, enable_
     cmd.append(script_path)
 
     try:
-        # TODO: update the logging handled; callback_raw=utils.logging_handler
         context_scratch.call(cmd, callback_raw=utils.logging_handler)
     except CalledProcessError as e:
         # FIXME: `inside DNF shell, failed transaction can end with 0 exit code
